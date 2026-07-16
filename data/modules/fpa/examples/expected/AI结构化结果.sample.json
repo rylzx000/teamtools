@@ -1,0 +1,81 @@
+{
+  "requirement_name": "查勘采集流程优化",
+  "assessment_context": {
+    "count_timing": "估算早期",
+    "source_level": "L2"
+  },
+  "project_features": {},
+  "items": [
+    {
+      "system": "在线理赔服务平台",
+      "level1_module": "车险理赔",
+      "level2_module": "查勘采集",
+      "level3_module": "",
+      "level4_module": "",
+      "function_description": "提交查勘采集信息并保存到理赔任务",
+      "count_item_name": "查勘采集信息提交",
+      "category": "EI",
+      "reuse": "中",
+      "change_type": "修改",
+      "remark": "提交采集结果会进入系统并维护理赔任务状态，属于外部输入。"
+    },
+    {
+      "system": "在线理赔服务平台",
+      "level1_module": "车险理赔",
+      "level2_module": "查勘采集",
+      "level3_module": "",
+      "level4_module": "",
+      "function_description": "维护查勘采集结果和缺项状态",
+      "count_item_name": "查勘采集结果数据组",
+      "category": "ILF",
+      "reuse": "低",
+      "change_type": "新增",
+      "remark": "需求要求保存采集结果、缺项状态和允许缺项提交标识，形成系统内部维护的逻辑数据组。"
+    },
+    {
+      "system": "在线理赔服务平台",
+      "level1_module": "车险理赔",
+      "level2_module": "查勘采集",
+      "level3_module": "",
+      "level4_module": "",
+      "function_description": "输出高风险查勘提示和处理进度",
+      "count_item_name": "查勘风险与进度输出",
+      "category": "EO",
+      "reuse": "中",
+      "change_type": "修改",
+      "remark": "风险说明和进度展示包含业务判断和派生输出，属于外部输出。"
+    },
+    {
+      "system": "在线理赔服务平台",
+      "level1_module": "车险理赔",
+      "level2_module": "查勘采集",
+      "level3_module": "",
+      "level4_module": "",
+      "function_description": "按案件号查询查勘采集结果",
+      "count_item_name": "查勘采集结果查询",
+      "category": "EQ",
+      "reuse": "高",
+      "change_type": "修改",
+      "remark": "按案件号检索并展示已保存的采集结果，不改变状态且无明显派生计算，属于外部查询。"
+    }
+  ],
+  "analysis_notes": "目标人天仅作为参考，本结果不输出最终人天或目标命中判断。",
+  "uncounted_items": [
+    {
+      "description": "查勘照片上传按钮文案调整",
+      "reason": "仅为按钮文案或纯 UI 表达，不形成独立业务基本过程。",
+      "related_requirement_section": "查勘采集页面新增信息采集"
+    }
+  ],
+  "quality_notes": [
+    {
+      "code": "REVIEW_STAGE_PREVIEW_SPLIT",
+      "message": "阶段预览、最终预览、缺项提示已按 EO/EQ 候选复核，需人工确认是否存在更多派生输出。",
+      "severity": "medium"
+    }
+  ],
+  "coverage_notes": "已覆盖提交、保存、风险输出和案件号查询；配置下发和补拍/跳过未在样例需求中明确描述，未单独计数。",
+  "uncertainties": [
+    "缺项配置是否由本系统维护不明确，如由本系统维护可能需要补充 ILF/EI。"
+  ]
+}

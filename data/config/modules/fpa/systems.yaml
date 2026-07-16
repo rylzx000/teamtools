@@ -1,0 +1,21 @@
+systems:
+  - code: claimcar
+    name: 车险理赔核心系统
+    system_type: 核心系统
+    knowledge_dir: modules/fpa/knowledge/claimcar
+    brief_file: teamtools-system-brief.md
+  - code: claimoth
+    name: 非车险理赔核心系统
+    system_type: 核心系统
+    knowledge_dir: modules/fpa/knowledge/claimoth
+    brief_file: teamtools-system-brief.md
+  - code: onlineclaim
+    name: 在线理赔服务平台
+    system_type: 多流程支持系统
+    knowledge_dir: modules/fpa/knowledge/onlineclaim
+    brief_file: teamtools-system-brief.md
+  - code: clqp
+    name: 零配件报价系统
+    system_type: 支持系统
+    knowledge_dir:
+    brief_file: teamtools-system-brief.md

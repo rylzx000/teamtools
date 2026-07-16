@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-07-15
+goal: 将 TeamTools 现有 README、架构文档、部署文档、FPA 模块文档和 UI 文档提炼为 OpenSpec 能力基线，保留源文档并建立结构化索引与验收规格。

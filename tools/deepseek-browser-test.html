@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeepSeek 浏览器直连验证</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --border: #d0d7de;
+      --muted: #57606a;
+      --ok: #1a7f37;
+      --warn: #9a6700;
+      --error: #cf222e;
+      --bg: #f6f8fa;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #24292f;
+      background: #ffffff;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px 20px 44px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+    }
+
+    .note {
+      margin: 0 0 20px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      background: #ffffff;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+    }
+
+    label {
+      font-weight: 600;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    button {
+      margin-top: 14px;
+      padding: 9px 16px;
+      border: 1px solid #1f6feb;
+      border-radius: 6px;
+      background: #1f6feb;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+
+    h2 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+
+    pre {
+      min-height: 22px;
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .status-ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .status-warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .status-error {
+      color: var(--error);
+      font-weight: 700;
+    }
+
+    .cors-tip {
+      border-left: 4px solid var(--warn);
+      background: #fff8c5;
+    }
+
+    @media (max-width: 640px) {
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>DeepSeek 浏览器直连验证</h1>
+    <p class="note">
+      此页面仅用于开发验证浏览器是否可以直接调用 DeepSeek API。API Key 只保存在当前页面内存中，不写入文件、不上传后端、不写入日志，也不会在页面中回显完整内容。
+    </p>
+
+    <section class="panel">
+      <div class="form-grid">
+        <label for="apiKey">API Key</label>
+        <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="请输入 DeepSeek API Key">
+
+        <label for="endpoint">Endpoint</label>
+        <input id="endpoint" type="url" spellcheck="false" value="https://api.deepseek.com/chat/completions">
+
+        <label for="model">Model</label>
+        <input id="model" type="text" spellcheck="false" value="deepseek-v4-flash">
+      </div>
+      <button id="testButton" type="button">测试调用</button>
+    </section>
+
+    <section class="panel cors-tip">
+      <h2>CORS 失败提示说明</h2>
+      <p class="note">
+        如果 fetch 抛出 Failed to fetch，浏览器通常不会把跨域响应细节暴露给页面。请打开开发者工具 Console，检查是否存在 CORS policy 或 Access-Control-Allow-Origin 相关错误。
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>请求状态</h2>
+      <pre id="requestStatus">未开始</pre>
+    </section>
+
+    <section class="panel">
+      <h2>HTTP 状态码</h2>
+      <pre id="httpStatus">-</pre>
+    </section>
+
+    <section class="panel">
+      <h2>响应头</h2>
+      <pre id="responseHeaders">-</pre>
+    </section>
+
+    <section class="panel">
+      <h2>响应正文</h2>
+      <pre id="responseBody">-</pre>
+    </section>
+
+    <section class="panel">
+      <h2>fetch 异常</h2>
+      <pre id="fetchError">-</pre>
+    </section>
+  </main>
+
+  <script>
+    const apiKeyInput = document.getElementById("apiKey");
+    const endpointInput = document.getElementById("endpoint");
+    const modelInput = document.getElementById("model");
+    const testButton = document.getElementById("testButton");
+    const requestStatus = document.getElementById("requestStatus");
+    const httpStatus = document.getElementById("httpStatus");
+    const responseHeaders = document.getElementById("responseHeaders");
+    const responseBody = document.getElementById("responseBody");
+    const fetchError = document.getElementById("fetchError");
+
+    function setText(element, text) {
+      element.textContent = text || "-";
+    }
+
+    function setStatus(text, className) {
+      requestStatus.className = className || "";
+      setText(requestStatus, text);
+    }
+
+    function resetResults() {
+      setStatus("准备发起浏览器直连请求...", "");
+      setText(httpStatus, "-");
+      setText(responseHeaders, "-");
+      setText(responseBody, "-");
+      setText(fetchError, "-");
+    }
+
+    function visibleHeaders(headers) {
+      const lines = [];
+      headers.forEach((value, key) => {
+        lines.push(`${key}: ${value}`);
+      });
+      return lines.length ? lines.join("\n") : "浏览器未暴露可读取的响应头。";
+    }
+
+    testButton.addEventListener("click", async () => {
+      const apiKey = apiKeyInput.value.trim();
+      const endpoint = endpointInput.value.trim();
+      const model = modelInput.value.trim();
+
+      resetResults();
+
+      if (!apiKey) {
+        setStatus("请先输入 API Key。", "status-error");
+        return;
+      }
+
+      if (!endpoint) {
+        setStatus("请先输入 Endpoint。", "status-error");
+        return;
+      }
+
+      if (!model) {
+        setStatus("请先输入 Model。", "status-error");
+        return;
+      }
+
+      const requestBody = {
+        model,
+        messages: [
+          {
+            role: "user",
+            content: "请只回复 JSON：{\"ok\":true}"
+          }
+        ],
+        temperature: 0
+      };
+
+      testButton.disabled = true;
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        const bodyText = await response.text();
+
+        setText(httpStatus, `${response.status} ${response.statusText || ""}`.trim());
+        setText(responseHeaders, visibleHeaders(response.headers));
+        setText(responseBody, bodyText || "响应正文为空。");
+
+        if (response.status === 200) {
+          setStatus("浏览器直连可用。", "status-ok");
+        } else {
+          setStatus("请求已到达 DeepSeek，CORS 基本可用，但业务请求失败。", "status-warn");
+        }
+      } catch (error) {
+        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        setStatus("浏览器请求失败，请打开开发者工具 Console，检查是否存在 CORS policy 或 Access-Control-Allow-Origin 相关错误。", "status-error");
+        setText(fetchError, message);
+      } finally {
+        testButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

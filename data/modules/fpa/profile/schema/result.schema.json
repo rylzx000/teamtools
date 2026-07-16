@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://teamtools.local/schemas/fpa/result.schema.json",
+  "title": "FPA AI 结构化结果",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "requirement_name",
+    "items"
+  ],
+  "properties": {
+    "requirement_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assessment_context": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "project_features": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "system",
+          "level1_module",
+          "function_description",
+          "count_item_name",
+          "category",
+          "reuse",
+          "change_type",
+          "remark"
+        ],
+        "properties": {
+          "system": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "车险理赔核心系统",
+              "非车险理赔核心系统",
+              "在线理赔服务平台",
+              "零配件报价系统"
+            ]
+          },
+          "level1_module": {
+            "type": "string",
+            "minLength": 1
+          },
+          "level2_module": {
+            "type": "string",
+            "default": ""
+          },
+          "level3_module": {
+            "type": "string",
+            "default": ""
+          },
+          "level4_module": {
+            "type": "string",
+            "default": ""
+          },
+          "function_description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "count_item_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "ILF",
+              "EIF",
+              "EI",
+              "EO",
+              "EQ"
+            ]
+          },
+          "reuse": {
+            "type": "string",
+            "enum": [
+              "高",
+              "中",
+              "低"
+            ]
+          },
+          "change_type": {
+            "type": "string",
+            "enum": [
+              "新增",
+              "修改",
+              "删除"
+            ]
+          },
+          "remark": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "analysis_notes": {
+      "type": "string",
+      "default": ""
+    },
+    "uncounted_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "description",
+          "reason",
+          "related_requirement_section"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "related_requirement_section": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "default": []
+    },
+    "quality_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "severity"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        }
+      },
+      "default": []
+    },
+    "coverage_notes": {
+      "type": "string",
+      "default": ""
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      "default": []
+    }
+  }
+}

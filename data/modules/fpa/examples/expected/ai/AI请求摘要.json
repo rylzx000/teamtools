@@ -1,0 +1,15 @@
+{
+  "task_id": "demo-task",
+  "module": "fpa",
+  "system_code": "onlineclaim",
+  "system_name": "在线理赔服务平台",
+  "no_knowledge_mode": false,
+  "input_chars": 196,
+  "knowledge_chars": 9860,
+  "schema_chars": 2673,
+  "prompt_chars": 14685,
+  "template_file": "data/modules/fpa/profile/skill/prompt_template.md",
+  "schema_file": "data/modules/fpa/profile/schema/result.schema.json",
+  "knowledge_file": "modules/fpa/knowledge/onlineclaim/teamtools-system-brief.md",
+  "created_at": "2026-07-05T09:20:04.403440+00:00"
+}

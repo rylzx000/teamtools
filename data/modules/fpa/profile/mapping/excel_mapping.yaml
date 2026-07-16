@@ -1,0 +1,68 @@
+version: fpa_excel_mapping.v1
+
+workbook:
+  default_template: data/modules/fpa/profile/templates/fpa_template.xlsx
+  required_sheets:
+    project_features: 项目特征
+    size_estimation: 规模估算
+    cost_estimation: 开发费用估算
+    parameters: 模板使用说明&基础参数
+
+project_features:
+  sheet: 项目特征
+  writable_range: C1:C9
+  fields:
+    规模计数时机: C1
+    应用类型: C2
+    分布式处理: C3
+    性能: C4
+    可靠性: C5
+    多重站点: C6
+    完整性级别: C7
+    开发语言: C8
+    开发团队背景: C9
+  protected_template_default:
+    开发平台: C10
+
+size_detail:
+  sheet: 规模估算
+  count_mode_cell: C1
+  result_cells:
+    function_point_total: C2
+    adjusted_fp_total: C3
+  detail_start_row: 6
+  template_detail_end_row: 14
+  template_extra_detail_row: 15
+  template_summary_row: 16
+  summary_label: 合计
+  writable_columns:
+    system: B
+    level1_module: C
+    level2_module: D
+    level3_module: E
+    level4_module: F
+    function_description: G
+    count_item_name: H
+    category: I
+    reuse: K
+    change_type: L
+    remark: N
+  formula_columns:
+    ufp: J
+    us: M
+  dynamic_formulas:
+    function_point_total: C2 = J{summary_row}
+    adjusted_fp_total: C3 = M{summary_row}
+    total_ufp: J{summary_row} = SUM(J6:J{last_detail_row})
+    total_us: M{summary_row} = SUM(M6:M{last_detail_row})
+
+cost_estimation:
+  sheet: 开发费用估算
+  adjusted_fp_input_cell: C1
+  adjusted_fp_input_formula: C1 = '规模估算'!M{summary_row}
+  middle_result_cell: C17
+
+script_result:
+  process_json_default: "{requirement_name}-FPA生成过程.json"
+  page_value_source: FPA生成过程.json
+  excel_formula_cache_policy: 不读取 xlsx 公式缓存；Excel/WPS 打开后自动重算模板公式。

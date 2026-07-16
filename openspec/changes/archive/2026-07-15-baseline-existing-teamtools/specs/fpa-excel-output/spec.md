@@ -1,0 +1,110 @@
+# fpa-excel-output Specification
+
+## Purpose
+定义 FPA Excel 生成链路中的三类 JSON 边界、脚本 payload、模板保真、功能点计算、目标命中、质量提示和结果展示口径。
+
+## Source Documents
+
+- `docs/modules/fpa/04-FPA计算规则.md`
+- `docs/modules/fpa/06-资源包与生成契约设计.md`
+- `docs/modules/fpa/08-Excel映射与脚本生成设计.md`
+- `scripts/fpa/fill_fpa_workbook.py`
+- `scripts/fpa/validate_ai_result.py`
+- `data/modules/fpa/profile/mapping/excel_mapping.yaml`
+- `data/modules/fpa/examples/excel/`
+
+## Requirements
+
+### Requirement: 三类 JSON 边界
+
+系统 MUST 区分 `AI结构化结果.json`、Excel 脚本输入 payload 和 `FPA生成过程.json`，不得要求 AI 直接输出模板路径、输出路径、目标命中、人天结果或 Excel 单元格信息。
+
+#### Scenario: 后端生成脚本 payload
+- **WHEN** AI 结构化结果通过校验
+- **THEN** 后端合并任务配置、模板配置、输出路径、目标人天和 AI 明细生成脚本 payload
+- **AND** 将平台字段 `target_person_days` 映射为脚本 payload 的 `target_work_days`
+
+#### Scenario: 脚本生成过程 JSON
+- **WHEN** Excel 脚本运行成功
+- **THEN** 脚本输出 `FPA生成过程.json`
+- **AND** 过程 JSON 包含标准化明细、计算结果、目标命中、质量提示和输出路径摘要
+
+### Requirement: Excel 模板保真
+
+系统 SHALL 以既有 `fpa_template.xlsx` 为母版生成 Excel，保留模板工作表、公式、样式、参数区、数据验证、列宽、行高和固定结构。
+
+#### Scenario: 生成正式 Excel
+- **WHEN** 脚本生成 `FPA工作量评估.xlsx`
+- **THEN** 输出文件必须基于模板复制和填充
+- **AND** 不得从零创建简化 workbook 或删除、重命名模板 sheet
+
+#### Scenario: 写入范围受限
+- **WHEN** 脚本填充明细和项目特征
+- **THEN** 只允许写入明确约定的输入单元格和明细字段列
+- **AND** 未被允许写入的公式区、参数区和结果区必须保持模板逻辑
+
+### Requirement: 功能点明细与备注规范
+
+系统 MUST 将功能点明细写入模板约定列，并保证备注具备可审计的类型、复用和修改依据。
+
+#### Scenario: 明细写入
+- **WHEN** payload 包含一组 `items`
+- **THEN** 脚本将系统、模块层级、功能描述、计数项、类别、复用程度、修改类型和备注写入对应明细列
+- **AND** 公式列只允许保留、复制或平移公式，不写业务值
+
+#### Scenario: 备注兜底
+- **WHEN** AI 输出备注缺少三段式依据
+- **THEN** 脚本根据 `category`、`reuse`、`change_type`、功能描述和原始备注生成兜底三段式备注
+- **AND** 备注必须包含“类别原因”“复用原因”和“修改类型原因”
+
+### Requirement: 动态明细行与公式引用
+
+系统 SHALL 支持超过模板默认明细行数的条目在同一个 Excel 文件内生成，并在插行时维护样式、公式、数据验证、合计行和引用公式。
+
+#### Scenario: 条目超过默认行数
+- **WHEN** `items.length` 超过模板默认明细行数量
+- **THEN** 脚本在合计行前插入新增明细行并复制样式、公式和数据验证
+- **AND** 合计公式和相关引用覆盖全部明细
+
+#### Scenario: 动态扩展失败
+- **WHEN** 插行、公式平移、数据验证扩展或模板结构校验失败
+- **THEN** 任务按技术失败处理
+- **AND** 不得生成 `completed` 状态下的可下载正式 Excel
+
+### Requirement: 计算结果与页面展示
+
+系统 MUST 由脚本按模板公式口径同步计算页面需要展示的关键结果，并写入 `FPA生成过程.json`；页面不得读取 `.xlsx` 公式缓存。
+
+#### Scenario: 计算中值人天
+- **WHEN** 脚本处理功能点明细
+- **THEN** 输出 UFP 合计、调整后功能点合计、规模计数因子、调整后规模和调整后工作量中值
+- **AND** Excel 文件保留模板公式，供用户打开后由办公软件重算
+
+#### Scenario: 目标命中
+- **WHEN** payload 包含 `target_work_days`
+- **THEN** 脚本按结果中值是否落在目标 ±10% 范围内生成 `target_check`
+- **AND** 页面展示的目标命中来自过程 JSON 或后端保存的脚本结果
+
+#### Scenario: 质量提示
+- **WHEN** 明细条数异常、目标偏差、备注缺失、无资料模式或复核风险存在
+- **THEN** 脚本或后端生成质量提示
+- **AND** 质量提示用于风险提醒，不默认阻止已成功生成的 Excel 下载
+
+### Requirement: 资源和依赖声明
+
+系统 SHALL 通过模块资源目录维护模板、映射、schema、提示词和样例，并在后端依赖中声明 Excel 生成所需库。
+
+#### Scenario: 运行 Excel 脚本
+- **WHEN** 后端调用 `scripts/fpa/fill_fpa_workbook.py`
+- **THEN** 运行环境必须具备 `openpyxl>=3.1`
+- **AND** 不依赖开发机全局 Python 的隐式安装状态
+
+#### Scenario: 样例验收
+- **WHEN** 验证 FPA Excel 生成链路
+- **THEN** 可以使用 `data/modules/fpa/examples/excel/` 下的样例 payload、过程 JSON 和 Excel 输出作为验收参考
+- **AND** 样例只作为验证资源，不作为前端页面内容
+
+## Known Limits / 待确认点
+
+- 旧外部 FPA 脚本的固定行数限制只属于历史实现现状，不得作为 TeamTools 目标契约。
+- 下限人天、上限人天和报价若要上页面，需要先补充脚本计算和过程 JSON 字段。

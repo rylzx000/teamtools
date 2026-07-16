@@ -1,0 +1,14 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{md,py,js,jsx,ts,tsx,json,yaml,yml,html,css,ps1,txt}]
+charset = utf-8
+
+[*.csv]
+charset = utf-8-bom
+

@@ -1,0 +1,20 @@
+{
+  "requirement_name": "查勘采集流程优化",
+  "target_work_days": 10.0,
+  "items": [
+    {
+      "system": "onlineclaim",
+      "level1_module": "车险理赔",
+      "level2_module": "查勘采集",
+      "level3_module": "",
+      "level4_module": "",
+      "function_description": "提交查勘采集信息并保存到理赔任务",
+      "count_item_name": "查勘采集信息提交",
+      "category": "INPUT",
+      "reuse": "中",
+      "change_type": "修改",
+      "remark": "用于验证非法枚举值、系统编码和禁止字段会被校验脚本拒绝。",
+      "extra_field": "not allowed"
+    }
+  ]
+}

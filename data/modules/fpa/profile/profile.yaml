@@ -1,0 +1,15 @@
+provider: deepseek
+model: deepseek-v4-flash
+request_format: messages
+temperature: 0.1
+top_p: 0.9
+max_input_chars: 30000
+max_knowledge_chars: 30000
+max_prompt_chars: 60000
+module: fpa
+
+resource_paths:
+  prompt_template: skill/prompt_template.md
+  result_schema: schema/result.schema.json
+  excel_template: templates/fpa_template.xlsx
+  excel_mapping: mapping/excel_mapping.yaml

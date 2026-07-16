@@ -1,0 +1,8 @@
+{
+  "task_id": "demo-task",
+  "requirement_title": "查勘采集流程优化",
+  "system_code": "onlineclaim",
+  "target_person_days": 10.0,
+  "count_timing": "估算早期",
+  "created_by": "demo"
+}
