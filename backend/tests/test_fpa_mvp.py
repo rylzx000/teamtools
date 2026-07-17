@@ -7,9 +7,12 @@ import sqlite3
 import tempfile
 import unittest
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 from http.cookies import SimpleCookie
 from urllib.parse import urlencode
+
+from openpyxl import load_workbook
 
 from app.config import get_config
 from app.db import initialize_database, open_connection
@@ -231,6 +234,29 @@ class FpaMvpTest(unittest.TestCase):
         sample = PROJECT_ROOT / "data" / "modules" / "fpa" / "examples" / "expected" / "AI结构化结果.sample.json"
         return json.loads(sample.read_text(encoding="utf-8"))
 
+    def structured_for_system(
+        self,
+        system_code: str = "claimcar",
+        system_name: str = VALID_SYSTEM_NAME,
+        *,
+        has_dictionary: bool = False,
+    ) -> dict:
+        structured = deepcopy(self.valid_structured_json())
+        structured["assessment_context"]["system_code"] = system_code
+        structured["assessment_context"]["system_name"] = system_name
+        if has_dictionary:
+            structured["assessment_context"]["has_system_scene_dictionary"] = True
+            structured["assessment_context"]["no_system_dictionary_mode"] = False
+            structured["assessment_context"]["dictionary_gap_note"] = ""
+            for route in structured["routing_decisions"]:
+                route["system_scene_ids"] = ["SC-001"]
+            for item in structured["frozen_items"]:
+                item["system_scene_ids"] = ["SC-001"]
+            structured["review_notes"] = []
+        for item in structured["frozen_items"]:
+            item["system"] = system_name
+        return structured
+
     def valid_raw_response(self) -> dict:
         sample = PROJECT_ROOT / "data" / "modules" / "fpa" / "examples" / "expected" / "AI响应.sample.md"
         return {"choices": [{"message": {"content": sample.read_text(encoding="utf-8")}}]}
@@ -349,6 +375,113 @@ class FpaMvpTest(unittest.TestCase):
                 ).fetchone()
             self.assertEqual(counts["ai_item_count"], 4)
             self.assertEqual(counts["result_item_count"], 4)
+
+    def test_dictionary_mapping_fields_are_preserved_to_excel_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="字典字段保留")
+            structured = self.structured_for_system(has_dictionary=True)
+            for index, item in enumerate(structured["frozen_items"], start=1):
+                item["level1_module"] = "理赔服务"
+                item["level2_module"] = f"字典二级模块{index}"
+                item["count_item_name"] = f"字典计数项{index}"
+
+            result = client.post(
+                f"/api/fpa/tasks/{task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "structured_json": structured,
+                },
+            )
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["task"]["status"], "completed")
+
+            task_root = tmp_path / "data" / "tasks" / "fpa" / task_id
+            excel_payload = json.loads((task_root / "runtime" / "Excel脚本输入payload.json").read_text(encoding="utf-8"))
+            process = json.loads((task_root / "runtime" / "FPA生成过程.json").read_text(encoding="utf-8"))
+            workbook = load_workbook(task_root / "output" / "FPA工作量评估.xlsx", data_only=False)
+            size = workbook["规模估算"]
+
+            for index, expected in enumerate(structured["frozen_items"], start=1):
+                row = 5 + index
+                payload_item = excel_payload["items"][index - 1]
+                process_item = process["items"][index - 1]
+                for field in ("level1_module", "level2_module", "count_item_name", "system_scene_ids"):
+                    self.assertEqual(payload_item[field], expected[field])
+                    self.assertEqual(process_item[field], expected[field])
+                self.assertEqual(size[f"C{row}"].value, expected["level1_module"])
+                self.assertEqual(size[f"D{row}"].value, expected["level2_module"])
+                self.assertEqual(size[f"H{row}"].value, expected["count_item_name"])
+
+    def test_target_person_days_does_not_change_frozen_items(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+            base_structured = self.structured_for_system()
+            expected_items = [
+                (
+                    item["stable_id"],
+                    item["function_description"],
+                    item["count_item_name"],
+                    item["category"],
+                    item["route_ids"],
+                )
+                for item in base_structured["frozen_items"]
+            ]
+
+            for target_days in ("1.0", "20.0"):
+                with self.subTest(target_days=target_days):
+                    task_id = self.create_waiting_task(
+                        client,
+                        title=f"目标人天{target_days}",
+                        target_days=target_days,
+                        system_code="claimcar",
+                    )
+                    result = client.post(
+                        f"/api/fpa/tasks/{task_id}/ai-result",
+                        json={
+                            "success": True,
+                            "provider": "deepseek",
+                            "model": "deepseek-v4-flash",
+                            "structured_json": deepcopy(base_structured),
+                        },
+                    )
+                    self.assertEqual(result.status_code, 200, result.text)
+                    self.assertEqual(result.json()["task"]["status"], "completed")
+
+                    task_root = tmp_path / "data" / "tasks" / "fpa" / task_id
+                    excel_payload = json.loads(
+                        (task_root / "runtime" / "Excel脚本输入payload.json").read_text(encoding="utf-8")
+                    )
+                    process = json.loads((task_root / "runtime" / "FPA生成过程.json").read_text(encoding="utf-8"))
+                    actual_payload_items = [
+                        (
+                            item["stable_id"],
+                            item["function_description"],
+                            item["count_item_name"],
+                            item["category"],
+                            item["route_ids"],
+                        )
+                        for item in excel_payload["items"]
+                    ]
+                    actual_process_items = [
+                        (
+                            item["stable_id"],
+                            item["function_description"],
+                            item["count_item_name"],
+                            item["category"],
+                            item["route_ids"],
+                        )
+                        for item in process["items"]
+                    ]
+                    self.assertEqual(excel_payload["target_work_days"], float(target_days))
+                    self.assertEqual(actual_payload_items, expected_items)
+                    self.assertEqual(actual_process_items, expected_items)
 
     def test_regular_user_sees_summary_not_internal_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

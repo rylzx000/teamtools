@@ -126,6 +126,80 @@ class AiRequestPackageTests(unittest.TestCase):
             self.assertGreater(summary["brief_chars"], 0)
             self.assertGreater(summary["prompt_chars"], 0)
 
+    def test_system_scene_dictionary_is_loaded_into_prompt_and_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_dir = tmp_path / "data"
+            knowledge_dir = data_dir / "modules" / "fpa" / "knowledge" / "testdict"
+            config_dir = data_dir / "config" / "modules" / "fpa"
+            output_dir = tmp_path / "ai"
+            knowledge_dir.mkdir(parents=True)
+            config_dir.mkdir(parents=True)
+            (knowledge_dir / "teamtools-system-brief.md").write_text(
+                "# 测试字典系统\n\n用于验证系统简述进入 AI 请求包。",
+                encoding="utf-8",
+            )
+            (knowledge_dir / "08-FPA场景拆分字典.md").write_text(
+                "\n".join(
+                    [
+                        "# FPA 场景拆分字典",
+                        "",
+                        "| 场景编号 | 一级模块 | 二级模块 | 功能点计数项名称 | 类别 |",
+                        "|---|---|---|---|---|",
+                        "| SC-001 | 理赔服务 | 影像资料 | 影像补传提交 | EI |",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            systems_config = config_dir / "systems.yaml"
+            systems_config.write_text(
+                "\n".join(
+                    [
+                        "systems:",
+                        "  - code: testdict",
+                        "    name: 测试字典系统",
+                        "    system_type: 核心系统",
+                        "    knowledge_dir: modules/fpa/knowledge/testdict",
+                        "    brief_file: teamtools-system-brief.md",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_builder(
+                "--task-dir",
+                "data/modules/fpa/examples/demo-task",
+                "--data-dir",
+                str(data_dir),
+                "--profile-dir",
+                "data/modules/fpa/profile",
+                "--systems-config",
+                str(systems_config),
+                "--system-code",
+                "testdict",
+                "--output-dir",
+                str(output_dir),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            package = json.loads((output_dir / "AI请求包.json").read_text(encoding="utf-8"))
+            summary = json.loads((output_dir / "AI请求摘要.json").read_text(encoding="utf-8"))
+            prompt = package["plain_prompt"]
+            self.assertIn("系统字典模式", prompt)
+            self.assertIn("SC-001", prompt)
+            self.assertIn("理赔服务", prompt)
+            self.assertIn("影像资料", prompt)
+            self.assertIn("影像补传提交", prompt)
+            self.assertTrue(package["metadata"]["has_system_scene_dictionary"])
+            self.assertFalse(package["metadata"]["no_system_dictionary_mode"])
+            self.assertEqual(
+                package["metadata"]["scene_dictionary_file"],
+                "modules/fpa/knowledge/testdict/08-FPA场景拆分字典.md",
+            )
+            self.assertTrue(summary["has_system_scene_dictionary"])
+            self.assertFalse(summary["no_system_dictionary_mode"])
+            self.assertGreater(summary["dictionary_chars"], 0)
+
     def test_unknown_system_code_fails_without_partial_package(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp) / "ai"

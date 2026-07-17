@@ -84,6 +84,21 @@ class FillFpaWorkbookTest(unittest.TestCase):
 
         return workbook, payload, process
 
+    def make_payload_with_item_count(self, item_count):
+        source_payload = json.loads(SAMPLE_PAYLOAD_PATH.read_text(encoding="utf-8"))
+        payload = deepcopy(source_payload)
+        source_items = source_payload["items"]
+        items = []
+        for index in range(item_count):
+            item = deepcopy(source_items[index % len(source_items)])
+            item["stable_id"] = f"FP-{index + 1:03d}"
+            item["function_description"] = f"{item['function_description']}（扩展样例{index + 1}）"
+            item["count_item_name"] = f"{item['count_item_name']}{index + 1:02d}"
+            item["remark"] = f"{item['remark']}；扩展样例{index + 1}"
+            items.append(item)
+        payload["items"] = items
+        return payload
+
     def test_generates_template_workbook_and_process_json(self):
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
@@ -207,6 +222,76 @@ class FillFpaWorkbookTest(unittest.TestCase):
             self.assertIn("A17:I17", merged_ranges)
             self.assertIn("K17:L17", merged_ranges)
             self.assertTrue({"A2:B2", "A4:N4", "D1:N1", "D2:N2", "A1:B1", "A3:B3", "D3:N3"}.issubset(merged_ranges))
+
+    def test_thirty_and_fifty_items_expand_in_single_workbook(self):
+        for item_count in (30, 50):
+            with self.subTest(item_count=item_count):
+                with tempfile.TemporaryDirectory() as temp_dir_name:
+                    temp_dir = Path(temp_dir_name)
+                    payload = self.make_payload_with_item_count(item_count)
+                    payload_path = temp_dir / f"payload-{item_count}.json"
+                    payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                    output_path = temp_dir / f"fpa-review-{item_count}.xlsx"
+                    process_path = temp_dir / f"fpa-review-{item_count}-process.json"
+
+                    self.run_script(payload_path, output_path, process_path)
+                    workbook, checked_payload, process = self.assert_basic_workbook_contract(
+                        output_path,
+                        process_path,
+                        payload_path,
+                    )
+
+                    last_detail_row = 5 + item_count
+                    summary_row = 6 + item_count
+                    self.assertEqual(process["item_count"], item_count)
+                    self.assertEqual(process["summary_row"], summary_row)
+                    self.assertEqual(process["detail_range"], f"规模估算!B6:N{last_detail_row}")
+
+                    size = workbook["规模估算"]
+                    cost = workbook["开发费用估算"]
+                    last_item = checked_payload["items"][-1]
+                    self.assertEqual(size[f"B{last_detail_row}"].value, last_item["system"])
+                    self.assertEqual(size[f"C{last_detail_row}"].value, last_item["level1_module"])
+                    self.assertEqual(size[f"D{last_detail_row}"].value, last_item["level2_module"])
+                    self.assertEqual(size[f"H{last_detail_row}"].value, last_item["count_item_name"])
+                    self.assertEqual(size[f"I{last_detail_row}"].value, last_item["category"])
+                    self.assertEqual(size[f"K{last_detail_row}"].value, last_item["reuse"])
+                    self.assertEqual(size[f"L{last_detail_row}"].value, last_item["change_type"])
+                    self.assertEqual(size[f"A{summary_row}"].value, "合计")
+                    self.assertEqual(size["C2"].value, f"=J{summary_row}")
+                    self.assertEqual(size["C3"].value, f"=M{summary_row}")
+                    self.assertEqual(size[f"J{summary_row}"].value, f"=SUM(J6:J{last_detail_row})")
+                    self.assertEqual(size[f"M{summary_row}"].value, f"=SUM(M6:M{last_detail_row})")
+                    self.assertEqual(cost["C1"].value, f"='规模估算'!M{summary_row}")
+
+                    for column in ("A", "J", "M"):
+                        self.assertIsInstance(size[f"{column}{last_detail_row}"].value, str)
+                        self.assertTrue(size[f"{column}{last_detail_row}"].value.startswith("="))
+                    for column in ("B", "C", "D", "I", "K", "L"):
+                        self.assertEqual(
+                            size[f"{column}{last_detail_row}"].style_id,
+                            size[f"{column}6"].style_id,
+                            msg=f"{column}{last_detail_row} should keep detail-row style",
+                        )
+
+                    validations = [str(dv.sqref) + ":" + str(dv.formula1) for dv in size.data_validations.dataValidation]
+                    self.assertTrue(
+                        any(
+                            f'I6:I{last_detail_row}:"ILF,EIF,EI,EO,EQ"' in validation
+                            for validation in validations
+                        )
+                    )
+                    self.assertTrue(any(f'K6:K{last_detail_row}:"高,中,低"' in validation for validation in validations))
+                    self.assertTrue(
+                        any(f'L6:L{last_detail_row}:"新增,修改,删除"' in validation for validation in validations)
+                    )
+                    self.assertFalse(any(f"I6:I{summary_row}" in validation for validation in validations))
+                    self.assertFalse(any(f"K6:K{summary_row}" in validation for validation in validations))
+                    self.assertFalse(any(f"L6:L{summary_row}" in validation for validation in validations))
+
+                    merged_ranges = {str(merged) for merged in size.merged_cells.ranges}
+                    self.assertIn(f"A{summary_row}:I{summary_row}", merged_ranges)
+                    self.assertIn(f"K{summary_row}:L{summary_row}", merged_ranges)
 
 
 if __name__ == "__main__":

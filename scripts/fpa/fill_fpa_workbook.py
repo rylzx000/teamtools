@@ -29,7 +29,6 @@ SHEET_PARAMS = "模板使用说明&基础参数"
 
 DETAIL_START_ROW = 6
 TEMPLATE_DETAIL_END_ROW = 14
-TEMPLATE_EXTRA_DETAIL_ROW = 15
 TEMPLATE_SUMMARY_ROW = 16
 MIN_DETAIL_ROWS = 1
 
@@ -335,6 +334,10 @@ def copy_row_style_and_formulas(ws, source_row: int, target_row: int) -> None:
                 target.value = source.value
 
 
+def detail_template_row(row: int) -> int:
+    return row if row <= TEMPLATE_DETAIL_END_ROW else TEMPLATE_DETAIL_END_ROW
+
+
 def preserve_size_sheet_dimensions(ws, row: int) -> None:
     ws.cell(row, 15).value = ""
 
@@ -388,7 +391,7 @@ def ensure_detail_rows(ws, item_count: int) -> tuple[int, int]:
         rows_to_insert = target_last_detail_row - TEMPLATE_SUMMARY_ROW + 1
         ws.insert_rows(TEMPLATE_SUMMARY_ROW, rows_to_insert)
         for row in range(TEMPLATE_SUMMARY_ROW, TEMPLATE_SUMMARY_ROW + rows_to_insert):
-            copy_row_style_and_formulas(ws, TEMPLATE_EXTRA_DETAIL_ROW, row)
+            copy_row_style_and_formulas(ws, TEMPLATE_DETAIL_END_ROW, row)
 
     summary_row = target_last_detail_row + 1
     if summary_row < TEMPLATE_SUMMARY_ROW:
@@ -403,7 +406,7 @@ def ensure_detail_rows(ws, item_count: int) -> tuple[int, int]:
     ws.merge_cells(start_row=summary_row, start_column=11, end_row=summary_row, end_column=12)
 
     for row in range(DETAIL_START_ROW, target_last_detail_row + 1):
-        copy_row_style_and_formulas(ws, TEMPLATE_EXTRA_DETAIL_ROW if row > TEMPLATE_DETAIL_END_ROW else row, row)
+        copy_row_style_and_formulas(ws, detail_template_row(row), row)
         clear_detail_inputs(ws, row)
 
     ws.cell(summary_row, 1).value = "合计"
