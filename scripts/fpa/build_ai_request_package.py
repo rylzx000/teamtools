@@ -14,6 +14,9 @@ from typing import Any
 
 PACKAGE_FILE = "AI请求包.json"
 SUMMARY_FILE = "AI请求摘要.json"
+SCENE_DICTIONARY_FILE = "08-FPA场景拆分字典.md"
+DEFAULT_COUNT_TIMING = "估算中期"
+DEFAULT_INTEGRITY_LEVEL = "完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式"
 
 
 class BuildError(Exception):
@@ -193,6 +196,19 @@ def ensure_nonempty_text(text: str, label: str) -> str:
     return stripped
 
 
+def normalize_project_features(task_params: dict[str, Any]) -> tuple[str, str]:
+    project_features = task_params.get("project_features")
+    if isinstance(project_features, dict):
+        count_timing = str(project_features.get("规模计数时机") or "").strip()
+        integrity_level = str(project_features.get("完整性级别") or "").strip()
+    else:
+        count_timing = ""
+        integrity_level = ""
+    count_timing = count_timing or str(task_params.get("规模计数时机") or task_params.get("count_timing") or "").strip()
+    integrity_level = integrity_level or str(task_params.get("完整性级别") or task_params.get("integrity_level") or "").strip()
+    return count_timing or DEFAULT_COUNT_TIMING, integrity_level or DEFAULT_INTEGRITY_LEVEL
+
+
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
@@ -253,7 +269,7 @@ def build_ai_request_package(
     system_type = str(system.get("system_type", ""))
     task_id = str(task_params.get("task_id") or task_dir.name)
     requirement_title = str(task_params.get("requirement_title") or task_id)
-    count_timing = str(task_params.get("count_timing") or "估算早期")
+    count_timing, integrity_level = normalize_project_features(task_params)
     target_person_days = task_params.get("target_person_days", "")
     if target_person_days is None:
         target_person_days = ""
@@ -268,18 +284,35 @@ def build_ai_request_package(
     knowledge_dir_value = str(system.get("knowledge_dir") or "").strip()
     brief_file_name = str(system.get("brief_file") or "teamtools-system-brief.md").strip()
     no_knowledge_mode = knowledge_dir_value == ""
-    knowledge_file: Path | None = None
-    knowledge_text = ""
+    brief_file: Path | None = None
+    dictionary_file: Path | None = None
+    brief_text = ""
+    dictionary_text = ""
+    has_system_scene_dictionary = False
+    no_system_dictionary_mode = True
     if no_knowledge_mode:
         knowledge_mode = "无资料模式：systems.yaml 中 knowledge_dir 为空，本次仅基于需求正文和 FPA 通用规则评估。"
+        dictionary_mode = "无系统字典模式：当前系统未配置资料目录，不能使用 08-FPA场景拆分字典.md；AI评估.md 和 JSON 必须记录资料缺口和待复核点。"
     else:
-        knowledge_file = data_dir / knowledge_dir_value / brief_file_name
-        if not knowledge_file.exists():
+        knowledge_dir = data_dir / knowledge_dir_value
+        dictionary_candidate = knowledge_dir / SCENE_DICTIONARY_FILE
+        if dictionary_candidate.exists():
+            dictionary_file = dictionary_candidate
+            dictionary_text = read_text(dictionary_file, SCENE_DICTIONARY_FILE).strip()
+            has_system_scene_dictionary = True
+            no_system_dictionary_mode = False
+        brief_file = knowledge_dir / brief_file_name
+        if not brief_file.exists():
             raise BuildError(f"系统资料配置错误: knowledge_dir 非空但 brief_file 缺失 ({knowledge_dir_value}/{brief_file_name})")
-        knowledge_text = read_text(knowledge_file, "teamtools-system-brief.md").strip()
-        if len(knowledge_text) > max_knowledge_chars:
-            raise BuildError(f"系统知识包过长: {len(knowledge_text)} > {max_knowledge_chars}，请检查系统资料配置")
-        knowledge_mode = "资料模式：仅使用当前系统的 teamtools-system-brief.md，不读取 source/ 全量资料。"
+        brief_text = read_text(brief_file, "teamtools-system-brief.md").strip()
+        knowledge_chars = len(dictionary_text) + len(brief_text)
+        if knowledge_chars > max_knowledge_chars:
+            raise BuildError(f"系统知识包过长: {knowledge_chars} > {max_knowledge_chars}，请检查系统资料配置")
+        knowledge_mode = "资料模式：优先使用 08-FPA场景拆分字典.md，再使用 teamtools-system-brief.md；不读取 source/ 全量资料。"
+        if has_system_scene_dictionary:
+            dictionary_mode = "系统字典模式：已加载 08-FPA场景拆分字典.md，AI 必须优先匹配系统场景编号、Excel 一级模块、Excel 二级模块和功能点计数项名称。"
+        else:
+            dictionary_mode = "无系统字典模式：当前系统资料包缺少 08-FPA场景拆分字典.md，允许继续；AI评估.md 和 JSON 必须记录资料缺口、临时归类依据和待复核点。"
 
     rendered = render_template(
         template_text,
@@ -290,9 +323,12 @@ def build_ai_request_package(
             "system_name": system_name,
             "system_type": system_type,
             "count_timing": count_timing,
+            "integrity_level": integrity_level,
             "target_person_days": str(target_person_days),
             "knowledge_mode": knowledge_mode,
-            "system_knowledge": knowledge_text or "无系统资料。",
+            "dictionary_mode": dictionary_mode,
+            "system_scene_dictionary": dictionary_text or "未加载 08-FPA场景拆分字典.md。",
+            "system_brief": brief_text or "无系统简述。",
             "merged_input": merged_input,
             "result_schema": schema_text,
         },
@@ -306,7 +342,8 @@ def build_ai_request_package(
 
     template_rel = rel_to_base(template_file, cwd)
     schema_rel = rel_to_base(schema_file, cwd)
-    knowledge_rel = rel_to_base(knowledge_file, data_dir) if knowledge_file else ""
+    brief_rel = rel_to_base(brief_file, data_dir) if brief_file else ""
+    dictionary_rel = rel_to_base(dictionary_file, data_dir) if dictionary_file else ""
     package = {
         "provider": str(profile.get("provider", "deepseek")),
         "model": str(profile.get("model", "deepseek-v4-flash")),
@@ -326,10 +363,17 @@ def build_ai_request_package(
             "system_code": effective_system_code,
             "system_name": system_name,
             "no_knowledge_mode": no_knowledge_mode,
+            "has_system_scene_dictionary": has_system_scene_dictionary,
+            "no_system_dictionary_mode": no_system_dictionary_mode,
             "target_person_days": target_person_days,
+            "project_features": {
+                "规模计数时机": count_timing,
+                "完整性级别": integrity_level,
+            },
             "template_file": template_rel,
             "schema_file": schema_rel,
-            "knowledge_file": knowledge_rel,
+            "scene_dictionary_file": dictionary_rel,
+            "knowledge_file": brief_rel,
         },
     }
     summary = {
@@ -338,13 +382,18 @@ def build_ai_request_package(
         "system_code": effective_system_code,
         "system_name": system_name,
         "no_knowledge_mode": no_knowledge_mode,
+        "has_system_scene_dictionary": has_system_scene_dictionary,
+        "no_system_dictionary_mode": no_system_dictionary_mode,
         "input_chars": len(merged_input),
-        "knowledge_chars": len(knowledge_text),
+        "dictionary_chars": len(dictionary_text),
+        "knowledge_chars": len(dictionary_text) + len(brief_text),
+        "brief_chars": len(brief_text),
         "schema_chars": len(schema_text),
         "prompt_chars": len(plain_prompt),
         "template_file": template_rel,
         "schema_file": schema_rel,
-        "knowledge_file": knowledge_rel,
+        "scene_dictionary_file": dictionary_rel,
+        "knowledge_file": brief_rel,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 

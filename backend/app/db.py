@@ -23,6 +23,7 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         display_name TEXT NOT NULL,
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL CHECK(role IN ('user', 'admin')),
+        default_system_code TEXT,
         enabled INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -162,6 +163,7 @@ def initialize_database(db_path: Path, *, seed_dev_users_enabled: bool | None = 
         migrate_legacy_tables(conn)
         for statement in SCHEMA_STATEMENTS:
             conn.execute(statement)
+        migrate_current_schema(conn)
         conn.execute("INSERT OR REPLACE INTO app_meta(key, value) VALUES (?, ?)", ("schema_version", "2"))
         should_seed = env_flag("TEAMTOOLS_SEED_DEV_USERS") if seed_dev_users_enabled is None else seed_dev_users_enabled
         if should_seed:
@@ -193,23 +195,38 @@ def migrate_legacy_tables(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE {table} RENAME TO {backup}")
 
 
+def migrate_current_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "default_system_code" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN default_system_code TEXT")
+
+
 def seed_dev_users(conn: sqlite3.Connection) -> None:
     # Development-only defaults for local MVP verification. Change passwords before real deployment.
     users = [
-        ("dev-admin", "admin", "管理员", "admin", "admin123"),
-        ("dev-demo", "demo", "演示用户", "user", "demo123"),
+        ("dev-admin", "admin", "管理员", "admin", "admin123", None),
+        ("dev-demo", "demo", "演示用户", "user", "demo123", "onlineclaim"),
     ]
-    for user_id, username, display_name, role, password in users:
+    for user_id, username, display_name, role, password, default_system_code in users:
         exists = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone()
         if exists:
+            if default_system_code:
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET default_system_code = COALESCE(default_system_code, ?), updated_at = ?
+                    WHERE username = ?
+                    """,
+                    (default_system_code, utc_now(), username),
+                )
             continue
         now = utc_now()
         conn.execute(
             """
-            INSERT INTO users(id, username, display_name, password_hash, role, enabled, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            INSERT INTO users(id, username, display_name, password_hash, role, default_system_code, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
             """,
-            (user_id, username, display_name, hash_password(password), role, now, now),
+            (user_id, username, display_name, hash_password(password), role, default_system_code, now, now),
         )
 
 

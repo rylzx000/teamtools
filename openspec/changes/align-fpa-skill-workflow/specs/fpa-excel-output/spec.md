@@ -29,10 +29,11 @@
 - **AND** 普通用户不得通过结果文件列表或下载接口获取
 - **AND** 该文件不得作为下次评估输入或正式审计产物
 
-#### Scenario: 脚本 payload 默认不保留
-- **WHEN** 平台不处于管理员排查保留模式
-- **THEN** 脚本 payload 应使用内存或运行时临时目录传递
-- **AND** 脚本执行完成后不得登记为任务正式产物
+#### Scenario: 脚本 payload 运行时保留
+- **WHEN** 平台在 MVP 阶段为脚本执行保留 payload
+- **THEN** 脚本 payload 只能作为 `runtime` 内部文件存在
+- **AND** 脚本执行完成后不得登记为任务正式产物或普通用户文件
+- **AND** 后续可优化为内存传递或执行后删除
 
 ### Requirement: 功能点明细与备注规范
 
@@ -93,15 +94,21 @@
 
 ### Requirement: 结构校验门禁
 
-系统 SHALL 使用 `structural_warnings`、`validation_gate` 和 `deliverable_valid` 表达 Excel 生成后的结构校验结论。
+系统 SHALL 使用 `quality_warnings`、`quality_gate` 和 `deliverable_valid` 表达 Excel 生成后的结构校验结论。
 
 #### Scenario: 结构校验通过
 - **WHEN** 模板结构、允许值、备注、公式保护和目标检查均无阻断问题
-- **THEN** `validation_gate.status` 为 `passed`
+- **THEN** `quality_gate.status` 为 `passed`
 - **AND** `deliverable_valid` 为 `true`
 
 #### Scenario: 需要人工复核
 - **WHEN** 存在备注不完整、目标偏离或其他不阻断交付的结构提醒
-- **THEN** `validation_gate.status` 为 `review_required`
+- **THEN** `quality_gate.status` 为 `review_required`
 - **AND** `deliverable_valid` 仍可为 `true`
 - **AND** 页面摘要和 `AI评估.md` 必须展示对应提醒
+
+#### Scenario: 结构校验失败
+- **WHEN** 存在模板结构异常、允许值非法、公式保护异常或其他阻断交付的问题
+- **THEN** `quality_gate.status` 为 `failed`
+- **AND** `deliverable_valid` 为 `false`
+- **AND** 任务不得把该 Excel 作为普通用户可下载的成功交付件

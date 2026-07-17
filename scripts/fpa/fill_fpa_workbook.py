@@ -40,14 +40,15 @@ ESTIMATION_WEIGHTS = {"ILF": 10.0, "EIF": 7.0, "EI": 4.0, "EO": 5.0, "EQ": 4.0}
 PRESIZE_WEIGHTS = {"ILF": 35.0, "EIF": 15.0, "EI": 0.0, "EO": 0.0, "EQ": 0.0}
 
 DEFAULT_PROJECT_FEATURES = {
-    "规模计数时机": "估算早期",
+    "规模计数时机": "估算中期",
+    "完整性级别": "完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式",
 }
 
 COUNT_TIMING_FACTORS = {
-    "项目启动": 1.39,
-    "估算早期": 1.21,
-    "需求完成": 1.10,
-    "需求稳定": 1.00,
+    "估算早期": 1.39,
+    "估算中期": 1.21,
+    "估算晚期": 1.10,
+    "项目交付后及运维阶段": 1.00,
 }
 APPLICATION_TYPE_FACTORS = {
     "业务处理": 1.00,
@@ -68,9 +69,9 @@ QUALITY_RATING_SCORES = {
     "极高": 5,
 }
 INTEGRITY_FACTORS = {
-    "低": 0.92,
-    "中等": 1.00,
-    "高": 1.10,
+    "没有明确的完整性级别或等级为C/D": 1.00,
+    "完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式": 1.10,
+    "完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施": 1.30,
 }
 LANGUAGE_FACTORS = {
     "4GL": 0.80,
@@ -112,6 +113,11 @@ PARAM_FACTOR_RANGES = {
     "开发语言": ("H34", "I36"),
     "开发团队背景": ("H40", "I42"),
     "开发平台": ("H56", "I57"),
+}
+
+PROJECT_FEATURE_FACTOR_FALLBACKS = {
+    "规模计数时机": COUNT_TIMING_FACTORS,
+    "完整性级别": INTEGRITY_FACTORS,
 }
 
 ITEM_COLUMN_MAP = {
@@ -220,12 +226,12 @@ def normalize_project_features(payload: dict[str, Any]) -> dict[str, str]:
         raise FpaPayloadError("project_features 必须是对象")
     for key, value in overrides.items():
         normalized_key = FEATURE_ALIASES.get(str(key), str(key))
-        if normalized_key == "规模计数时机" and value not in (None, ""):
+        if normalized_key in DEFAULT_PROJECT_FEATURES and value not in (None, ""):
             project_features[normalized_key] = str(value)
     return project_features
 
 
-def normalize_items(payload: dict[str, Any]) -> list[dict[str, str]]:
+def normalize_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     items = payload.get("items")
     if not isinstance(items, list) or not items:
         raise FpaPayloadError("items 必须是非空数组")
@@ -233,10 +239,13 @@ def normalize_items(payload: dict[str, Any]) -> list[dict[str, str]]:
     for index, raw in enumerate(items, 1):
         if not isinstance(raw, dict):
             raise FpaPayloadError(f"items[{index}] 必须是对象")
-        item: dict[str, str] = {}
+        item: dict[str, Any] = {}
         for key in ITEM_COLUMN_MAP:
             value = raw.get(key, "")
             item[key] = "" if value is None else str(value).strip()
+        for trace_key in ("stable_id", "fact_ids", "route_ids", "system_scene_ids"):
+            if trace_key in raw:
+                item[trace_key] = raw[trace_key]
         for required in ["system", "level1_module", "function_description", "count_item_name"]:
             if not item[required]:
                 raise FpaPayloadError(f"items[{index}].{required} 不能为空")
@@ -417,8 +426,10 @@ def ensure_detail_rows(ws, item_count: int) -> tuple[int, int]:
 
 
 def fill_project_features(ws, features: dict[str, str]) -> None:
-    if "规模计数时机" in features:
-        ws["C1"] = features["规模计数时机"]
+    for feature_name, value in features.items():
+        cell_address = PROJECT_FEATURE_CELL_MAP.get(feature_name)
+        if cell_address:
+            ws[cell_address] = value
 
 
 def fill_items(ws, items: list[dict[str, str]]) -> None:
@@ -468,10 +479,11 @@ def read_effective_project_features(ws_project, ws_params, overrides: dict[str, 
         value = ws_project[cell_address].value
         if isinstance(value, ArrayFormula):
             value = None
-        if feature_name == "规模计数时机" and overrides.get("规模计数时机"):
-            value = overrides["规模计数时机"]
+        if overrides.get(feature_name):
+            value = overrides[feature_name]
         features[feature_name] = "" if value is None else str(value)
-        factors[feature_name] = read_factor_from_params(ws_params, feature_name, features[feature_name])
+        fallback = PROJECT_FEATURE_FACTOR_FALLBACKS.get(feature_name, {}).get(features[feature_name], 1.0)
+        factors[feature_name] = read_factor_from_params(ws_params, feature_name, features[feature_name], fallback)
     return features, factors
 
 

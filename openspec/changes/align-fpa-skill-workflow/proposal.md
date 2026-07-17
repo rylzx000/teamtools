@@ -1,6 +1,6 @@
 ## Why
 
-现有 TeamTools FPA 链路要求 AI 直接输出 `items` 明细，后端校验后交给 Excel 脚本生成结果；但新版 `fpa-skill` 已调整为“变更事实清单 -> 场景路由 -> 拆分/合并决策 -> 冻结功能点清单 -> 确定性 Excel 生成”的流程。需要先用 OpenSpec 固化新契约，避免后续提示词、JSON schema、后端产物和 Excel 脚本各自演进导致流程不一致。
+现有 TeamTools FPA 链路要求 AI 直接输出 `items` 明细，后端校验后交给 Excel 脚本生成结果；但新版 `fpa-skill` 已调整为“变更事实清单 -> 场景路由 -> 拆分/合并决策 -> 冻结功能点清单 -> 确定性 Excel 生成”的流程。本 change 原先用于固化新版 FPA skill 工作流契约，当前已进入实现落地阶段，文档补齐用于让 OpenSpec 与已实现行为保持一致。
 
 ## What Changes
 
@@ -10,7 +10,10 @@
 - 明确 Excel 脚本只负责确定性填充、计算、模板保真和结构校验，不再用脚本判断功能点拆分是否业务充分。
 - 明确普通用户和管理员对 AI 请求包、结构化结果、过程 JSON、错误摘要和排查文件的可见性边界。
 - 调整页面流程展示为简化用户流程，不展示内部 JSON、payload、路由结构或过程 JSON。
-- 不在本 change 中实现业务代码；本 change 只建立文档契约和后续开发任务清单。
+- 增加跑 AI 前的系统轻校验，减少选错系统导致的无效 token 消耗和错误结果。
+- 增加用户默认系统，匹配团队成员通常长期负责固定系统的使用习惯。
+- 明确 AI 结构化结果必须绑定当前任务选择系统，并对追溯编号格式做强校验。
+- 覆盖 OpenSpec 契约、提示词/schema、后端任务链路、前端页面状态、Excel 脚本、测试与样例的对齐。
 
 ## Capabilities
 
@@ -28,6 +31,6 @@
 ## Impact
 
 - 影响文档与规格：`openspec/specs/fpa-ai-contract`、`openspec/specs/fpa-workflow`、`openspec/specs/fpa-excel-output`、`openspec/specs/fpa-interface-ui`。
-- 后续实现会影响：`data/modules/fpa/profile/skill/prompt_template.md`、`data/modules/fpa/profile/schema/result.schema.json`、`scripts/fpa/build_ai_request_package.py`、`scripts/fpa/validate_ai_result.py`、`scripts/fpa/fill_fpa_workbook.py`、`backend/app/modules/fpa/service.py`。
-- 后续验证会影响：FPA 样例 payload、AI 输出样例、Excel 生成样例、端到端任务验证。
+- 本 change 覆盖实现文件：`data/modules/fpa/profile/skill/prompt_template.md`、`data/modules/fpa/profile/schema/result.schema.json`、`scripts/fpa/build_ai_request_package.py`、`scripts/fpa/validate_ai_result.py`、`scripts/fpa/fill_fpa_workbook.py`、`backend/app/modules/fpa/service.py`。
+- 本 change 覆盖验证资产：FPA 样例 payload、AI 输出样例、Excel 生成样例、端到端任务验证。
 - 本 change 不修改前端视觉设计、不新增模型供应商、不改变登录权限体系、不引入在线维护系统资料能力。

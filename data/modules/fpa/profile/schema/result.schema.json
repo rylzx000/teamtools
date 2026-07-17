@@ -5,44 +5,349 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "schema_version",
     "requirement_name",
-    "items"
+    "assessment_context",
+    "change_facts",
+    "routing_decisions",
+    "split_merge_decisions",
+    "frozen_items"
   ],
   "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "fpa.ai_contract.v2"
+    },
     "requirement_name": {
       "type": "string",
       "minLength": 1
     },
     "assessment_context": {
       "type": "object",
-      "additionalProperties": true,
-      "default": {}
+      "additionalProperties": false,
+      "required": [
+        "system_code",
+        "system_name",
+        "system_type",
+        "has_system_knowledge",
+        "has_system_scene_dictionary",
+        "no_system_dictionary_mode",
+        "target_person_days_provided",
+        "target_calibration_policy"
+      ],
+      "properties": {
+        "system_code": {
+          "type": "string",
+          "enum": [
+            "claimcar",
+            "claimoth",
+            "onlineclaim",
+            "clqp"
+          ]
+        },
+        "system_name": {
+          "type": "string",
+          "enum": [
+            "车险理赔核心系统",
+            "非车险理赔核心系统",
+            "在线理赔服务平台",
+            "零配件报价系统"
+          ]
+        },
+        "system_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_level": {
+          "type": "string",
+          "default": ""
+        },
+        "requirement_level": {
+          "type": "string",
+          "default": ""
+        },
+        "estimation_mode": {
+          "type": "string",
+          "default": ""
+        },
+        "has_system_knowledge": {
+          "type": "boolean"
+        },
+        "has_system_scene_dictionary": {
+          "type": "boolean"
+        },
+        "no_system_dictionary_mode": {
+          "type": "boolean"
+        },
+        "target_person_days_provided": {
+          "type": "boolean"
+        },
+        "target_calibration_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dictionary_gap_note": {
+          "type": "string",
+          "default": ""
+        }
+      }
     },
     "project_features": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
+      "properties": {
+        "规模计数时机": {
+          "type": "string",
+          "enum": [
+            "估算早期",
+            "估算中期",
+            "估算晚期",
+            "项目交付后及运维阶段"
+          ]
+        },
+        "完整性级别": {
+          "type": "string",
+          "enum": [
+            "没有明确的完整性级别或等级为C/D",
+            "完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式",
+            "完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施"
+          ]
+        }
+      },
       "default": {}
     },
-    "items": {
+    "change_facts": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "fact_id",
+          "business_purpose",
+          "trigger",
+          "input",
+          "processing",
+          "output",
+          "maintained_data",
+          "referenced_data",
+          "evidence",
+          "in_scope"
+        ],
+        "properties": {
+          "fact_id": {
+            "type": "string",
+            "pattern": "^F-[0-9]{3}$"
+          },
+          "business_purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "trigger": {
+            "type": "string",
+            "minLength": 1
+          },
+          "input": {
+            "type": "string",
+            "default": ""
+          },
+          "processing": {
+            "type": "string",
+            "minLength": 1
+          },
+          "output": {
+            "type": "string",
+            "default": ""
+          },
+          "maintained_data": {
+            "type": "string",
+            "default": ""
+          },
+          "referenced_data": {
+            "type": "string",
+            "default": ""
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "in_scope": {
+            "type": "boolean"
+          },
+          "exclusion_reason": {
+            "type": "string",
+            "default": ""
+          }
+        }
+      }
+    },
+    "routing_decisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "route_id",
+          "fact_ids",
+          "route_code",
+          "route_name",
+          "decision",
+          "rationale"
+        ],
+        "properties": {
+          "route_id": {
+            "type": "string",
+            "pattern": "^R-[0-9]{3}$"
+          },
+          "fact_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^F-[0-9]{3}$"
+            }
+          },
+          "route_code": {
+            "type": "string",
+            "enum": [
+              "R00",
+              "R01",
+              "R02",
+              "R03",
+              "R04",
+              "R05",
+              "R06",
+              "R07",
+              "R08",
+              "R09",
+              "R10",
+              "R11",
+              "R12",
+              "R13",
+              "R14",
+              "R15"
+            ]
+          },
+          "route_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "candidate_category": {
+            "type": "string",
+            "enum": [
+              "ILF",
+              "EIF",
+              "EI",
+              "EO",
+              "EQ",
+              "不计数",
+              "待复核"
+            ],
+            "default": "待复核"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "计数",
+              "合并",
+              "不计数",
+              "待复核"
+            ]
+          },
+          "system_scene_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "default": []
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "split_merge_decisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision_id",
+          "route_ids",
+          "decision",
+          "rationale"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "pattern": "^D-[0-9]{3}$"
+          },
+          "route_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^R-[0-9]{3}$"
+            }
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "拆分",
+              "合并",
+              "不计数",
+              "待复核"
+            ]
+          },
+          "result_stable_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^FP-[0-9]{3}$"
+            },
+            "default": []
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "frozen_items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stable_id",
           "system",
           "level1_module",
+          "level2_module",
+          "level3_module",
+          "level4_module",
           "function_description",
           "count_item_name",
           "category",
           "reuse",
           "change_type",
-          "remark"
+          "remark",
+          "fact_ids",
+          "route_ids"
         ],
         "properties": {
+          "stable_id": {
+            "type": "string",
+            "pattern": "^FP-[0-9]{3}$"
+          },
           "system": {
             "type": "string",
-            "minLength": 1,
             "enum": [
               "车险理赔核心系统",
               "非车险理赔核心系统",
@@ -55,16 +360,13 @@
             "minLength": 1
           },
           "level2_module": {
-            "type": "string",
-            "default": ""
+            "type": "string"
           },
           "level3_module": {
-            "type": "string",
-            "default": ""
+            "type": "string"
           },
           "level4_module": {
-            "type": "string",
-            "default": ""
+            "type": "string"
           },
           "function_description": {
             "type": "string",
@@ -103,42 +405,35 @@
           "remark": {
             "type": "string",
             "minLength": 1
+          },
+          "fact_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^F-[0-9]{3}$"
+            }
+          },
+          "route_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^R-[0-9]{3}$"
+            }
+          },
+          "system_scene_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "default": []
           }
         }
       }
     },
-    "analysis_notes": {
-      "type": "string",
-      "default": ""
-    },
-    "uncounted_items": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "description",
-          "reason",
-          "related_requirement_section"
-        ],
-        "properties": {
-          "description": {
-            "type": "string",
-            "minLength": 1
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1
-          },
-          "related_requirement_section": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      },
-      "default": []
-    },
-    "quality_notes": {
+    "review_notes": {
       "type": "array",
       "items": {
         "type": "object",
@@ -166,25 +461,6 @@
             ]
           }
         }
-      },
-      "default": []
-    },
-    "coverage_notes": {
-      "type": "string",
-      "default": ""
-    },
-    "uncertainties": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "object",
-            "additionalProperties": true
-          }
-        ]
       },
       "default": []
     }

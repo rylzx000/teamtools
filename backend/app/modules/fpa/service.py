@@ -33,7 +33,37 @@ STATUSES = {
     "failed": "失败",
     "canceled": "已取消",
 }
-COUNT_TIMINGS = {"估算早期": 0.8, "估算中期": 1.0, "估算晚期": 1.2}
+DEFAULT_COUNT_TIMING = "估算中期"
+DEFAULT_INTEGRITY_LEVEL = "完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式"
+COUNT_TIMINGS = {
+    "估算早期": 1.39,
+    "估算中期": 1.21,
+    "估算晚期": 1.10,
+    "项目交付后及运维阶段": 1.00,
+}
+INTEGRITY_LEVELS = {
+    "没有明确的完整性级别或等级为C/D",
+    DEFAULT_INTEGRITY_LEVEL,
+    "完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施",
+}
+COMMON_RELEVANCE_TOKENS = {
+    "系统",
+    "需求",
+    "功能",
+    "新增",
+    "修改",
+    "查询",
+    "提交",
+    "用户",
+    "信息",
+    "处理",
+    "平台",
+    "核心",
+    "服务",
+    "状态",
+    "流程",
+    "任务",
+}
 SYSTEMS = [
     {"code": "claimcar", "name": "车险理赔核心系统", "sort_order": 10, "knowledge_dir": "claimcar"},
     {"code": "claimoth", "name": "非车险理赔核心系统", "sort_order": 20, "knowledge_dir": "claimoth"},
@@ -155,6 +185,26 @@ def system_by_code(data_dir: Path, code: str) -> dict[str, Any]:
     raise FpaError("系统编码不存在", 400, "task_create")
 
 
+def system_entries(data_dir: Path) -> list[dict[str, Any]]:
+    ensure_resources(data_dir)
+    systems_yaml = data_dir / "config" / "modules" / "fpa" / "systems.yaml"
+    payload = yaml.safe_load(systems_yaml.read_text(encoding="utf-8")) or {}
+    return [dict(item) for item in (payload.get("systems") or SYSTEMS)]
+
+
+def knowledge_dir_path(data_dir: Path, system: dict[str, Any]) -> Path | None:
+    raw = system.get("knowledge_dir")
+    if not raw:
+        return None
+    path = Path(str(raw))
+    if path.is_absolute():
+        return path
+    candidate = data_dir / path
+    if candidate.exists():
+        return candidate
+    return data_dir / "modules" / "fpa" / "knowledge" / str(raw)
+
+
 def task_paths(data_dir: Path, task_id: str) -> FpaPaths:
     root = data_dir / "tasks" / "fpa" / task_id
     paths = FpaPaths(root, root / "input", root / "ai", root / "runtime", root / "output")
@@ -209,7 +259,8 @@ def create_task(
     uploaded_text: str | None = None,
     uploaded_name: str | None = None,
     target_person_days: float | None = None,
-    count_timing: str = "估算早期",
+    count_timing: str = DEFAULT_COUNT_TIMING,
+    integrity_level: str = DEFAULT_INTEGRITY_LEVEL,
     rerun_from_task_id: str | None = None,
 ) -> dict[str, Any]:
     ensure_resources(data_dir)
@@ -223,6 +274,8 @@ def create_task(
         raise FpaError("目标人天必须大于 0", 400, "task_create")
     if count_timing not in COUNT_TIMINGS:
         raise FpaError("规模计数时机不支持", 400, "task_create")
+    if integrity_level not in INTEGRITY_LEVELS:
+        raise FpaError("完整性级别不支持", 400, "task_create")
 
     system = system_by_code(data_dir, system_code)
     requirement_title = (title or "").strip() or "FPA工作量评估"
@@ -252,6 +305,7 @@ def create_task(
         "title": requirement_title,
         "target_person_days": target_person_days,
         "count_timing": count_timing,
+        "integrity_level": integrity_level,
         "created_by": user["id"],
     }
     (paths.input_dir / "task_params.json").write_text(json.dumps(params, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -383,6 +437,7 @@ def fetch_ai_request(db_path: Path, data_dir: Path, task_id: str, user: dict[str
     return {
         "task": {"id": task_id, "status": task["status"], "status_label": STATUSES[task["status"]]},
         "ai_request": sanitize_ai_request(package),
+        "system_relevance": build_system_relevance(data_dir, task_id, task),
     }
 
 
@@ -421,23 +476,30 @@ def task_detail(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any
     task_public = public_task(task)
     task_public["quality_flags"] = json.loads(task.get("quality_flags") or "[]")
     process_path = paths.runtime_dir / "FPA生成过程.json"
-    analysis_path = paths.ai_dir / "AI分析.md"
+    analysis_path = analysis_markdown_path(paths)
     excel_path = paths.output_dir / "FPA工作量评估.xlsx"
     summary_path = paths.ai_dir / "AI请求摘要.json"
+    is_admin = user["role"] == "admin"
+    process = read_json(process_path) if process_path.exists() else None
+    result_summary = summarize_process(process) if isinstance(process, dict) else None
     return {
         "task": task_public,
         "artifacts": {
             "ai_request_summary": {
-                "available": summary_path.exists() and user["role"] == "admin",
-                "content": read_json(summary_path) if summary_path.exists() and user["role"] == "admin" else None,
+                "available": summary_path.exists() and is_admin,
+                "content": read_json(summary_path) if summary_path.exists() and is_admin else None,
             },
             "ai_analysis_md": {
-                "available": analysis_path.exists(),
-                "content": analysis_path.read_text(encoding="utf-8") if analysis_path.exists() else None,
+                "available": analysis_path is not None,
+                "content": analysis_path.read_text(encoding="utf-8") if analysis_path else None,
             },
             "fpa_process_json": {
-                "available": process_path.exists(),
-                "content": read_json(process_path) if process_path.exists() else None,
+                "available": process_path.exists() and is_admin,
+                "content": process if process_path.exists() and is_admin else None,
+            },
+            "result_summary": {
+                "available": result_summary is not None,
+                "content": result_summary,
             },
             "excel_result": {
                 "available": excel_path.exists() and task["status"] == "completed",
@@ -449,6 +511,154 @@ def task_detail(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any
 
 def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_task_params(paths: FpaPaths) -> dict[str, Any]:
+    path = paths.input_dir / "task_params.json"
+    if not path.exists():
+        return {}
+    data = read_json(path)
+    return data if isinstance(data, dict) else {}
+
+
+def write_task_params(paths: FpaPaths, params: dict[str, Any]) -> None:
+    (paths.input_dir / "task_params.json").write_text(json.dumps(params, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def relevance_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for raw in re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+", text.lower()):
+        if not raw or raw in COMMON_RELEVANCE_TOKENS:
+            continue
+        if re.fullmatch(r"[a-z0-9_]+", raw):
+            tokens.add(raw)
+            continue
+        if 2 <= len(raw) <= 8:
+            tokens.add(raw)
+        for size in (2, 3, 4, 5, 6):
+            if len(raw) > size:
+                tokens.update(raw[index : index + size] for index in range(len(raw) - size + 1))
+    return {token for token in tokens if token not in COMMON_RELEVANCE_TOKENS}
+
+
+def system_relevance_text(data_dir: Path, system: dict[str, Any]) -> str:
+    chunks = [str(system.get("code") or ""), str(system.get("name") or "")]
+    root = knowledge_dir_path(data_dir, system)
+    if root:
+        for name in (str(system.get("brief_file") or "teamtools-system-brief.md"), "08-FPA场景拆分字典.md"):
+            path = root / name
+            if path.exists():
+                chunks.append(path.read_text(encoding="utf-8"))
+    return "\n".join(chunks)
+
+
+def score_system_relevance(input_text: str, system: dict[str, Any], tokens: set[str]) -> int:
+    text = input_text.lower()
+    score = 0
+    code = str(system.get("code") or "").lower()
+    name = str(system.get("name") or "")
+    if code and code in text:
+        score += 8
+    if name and name in input_text:
+        score += 10
+    for token in tokens:
+        if len(token) < 2 or token in COMMON_RELEVANCE_TOKENS:
+            continue
+        if token in text:
+            score += 2 if len(token) >= 4 else 1
+    return score
+
+
+def build_system_relevance(data_dir: Path, task_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    paths = task_paths(data_dir, task_id)
+    params = read_task_params(paths)
+    selected_code = str(task["system_code"])
+    selected_name = str(task["system_name"])
+    input_path = paths.input_dir / "merged_input.md"
+    input_text = input_path.read_text(encoding="utf-8") if input_path.exists() else ""
+
+    scored: list[dict[str, Any]] = []
+    for system in system_entries(data_dir):
+        tokens = relevance_tokens(system_relevance_text(data_dir, system))
+        score = score_system_relevance(input_text, system, tokens)
+        scored.append({"system": system, "score": score})
+
+    selected = next((item for item in scored if item["system"].get("code") == selected_code), None)
+    best = max(scored, key=lambda item: item["score"], default=selected)
+    selected_score = int(selected["score"] if selected else 0)
+    best_score = int(best["score"] if best else 0)
+    best_system = dict(best["system"] if best else task)
+    confirmed = bool(params.get("system_relevance_confirmed"))
+    status = "pass"
+    if best_system.get("code") != selected_code and best_score >= max(selected_score + 4, 5):
+        status = "warning"
+    if best_system.get("code") != selected_code and selected_score <= 1 and best_score >= 8:
+        status = "blocked"
+    if status == "blocked" and selected and not selected["system"].get("knowledge_dir"):
+        status = "warning"
+    message = "系统选择与需求文本未发现明显冲突。"
+    if status in {"warning", "blocked"}:
+        message = f"当前需求可能更像【{best_system.get('name')}】，你选择的是【{selected_name}】，是否仍按当前系统继续？"
+    if confirmed:
+        message = "用户已确认按当前选择系统继续评估。"
+
+    return {
+        "status": status,
+        "confirmed": confirmed,
+        "selected_system_code": selected_code,
+        "selected_system_name": selected_name,
+        "best_match_system_code": str(best_system.get("code") or ""),
+        "best_match_system_name": str(best_system.get("name") or ""),
+        "selected_score": selected_score,
+        "best_match_score": best_score,
+        "message": message,
+    }
+
+
+def confirm_system_relevance(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any]) -> dict[str, Any]:
+    with open_connection(db_path) as conn:
+        task = get_task_for_user(conn, task_id, user)
+        if task["status"] != "waiting_ai_call":
+            raise FpaError("当前状态不能确认系统选择", 409, "system_relevance")
+    relevance = build_system_relevance(data_dir, task_id, task)
+    paths = task_paths(data_dir, task_id)
+    params = read_task_params(paths)
+    params.update(
+        {
+            "system_relevance_confirmed": True,
+            "system_relevance_status": relevance["status"],
+            "best_match_system_code": relevance["best_match_system_code"],
+            "confirmed_at": utc_now(),
+        }
+    )
+    write_task_params(paths, params)
+    write_task_event(db_path, task_id, "system_relevance_confirmed", "用户确认按当前系统继续评估")
+    return {"system_relevance": build_system_relevance(data_dir, task_id, task)}
+
+
+def analysis_markdown_path(paths: FpaPaths) -> Path | None:
+    for name in ("AI评估.md", "AI分析.md"):
+        path = paths.ai_dir / name
+        if path.exists():
+            return path
+    return None
+
+
+def summarize_process(process: dict[str, Any]) -> dict[str, Any]:
+    estimates = process.get("estimates") if isinstance(process.get("estimates"), dict) else {}
+    context = process.get("assessment_context") if isinstance(process.get("assessment_context"), dict) else {}
+    return {
+        "item_count": process.get("item_count"),
+        "function_point_total": estimates.get("function_point_total"),
+        "adjusted_fp_total": estimates.get("adjusted_fp_total"),
+        "work_days": estimates.get("work_days") if isinstance(estimates.get("work_days"), dict) else {},
+        "target_check": estimates.get("target_check") if isinstance(estimates.get("target_check"), dict) else {},
+        "quality_gate": process.get("quality_gate") if isinstance(process.get("quality_gate"), dict) else {},
+        "quality_warnings": process.get("quality_warnings") or [],
+        "review_notes": context.get("review_notes") or context.get("quality_notes") or process.get("review_notes") or [],
+        "uncounted_items": context.get("uncounted_items") or [],
+        "coverage_notes": context.get("coverage_notes") or "",
+    }
 
 
 def handle_ai_result(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -466,7 +676,7 @@ def handle_ai_result(db_path: Path, data_dir: Path, task_id: str, user: dict[str
         return {"task": {"id": task_id, "status": "failed", "status_label": STATUSES["failed"]}}
 
     (paths.ai_dir / "AI原始响应.json").write_text(
-        json.dumps(payload.get("raw_response") or payload, ensure_ascii=False, indent=2),
+        json.dumps(safe_ai_result_payload(payload), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     register_file(db_path, data_dir, task_id, "ai_raw_response", paths.ai_dir / "AI原始响应.json", admin_only=True)
@@ -477,21 +687,30 @@ def handle_ai_result(db_path: Path, data_dir: Path, task_id: str, user: dict[str
         )
         conn.commit()
     try:
-        structured = payload.get("structured_json") or extract_json(payload.get("raw_response"))
-        validate_structured_json(structured, data_dir)
+        ai_assessment_md, structured = extract_ai_response(payload)
+        validate_structured_json(
+            structured,
+            data_dir,
+            expected_system_code=task["system_code"],
+            expected_system_name=task["system_name"],
+        )
         (paths.ai_dir / "AI结构化结果.json").write_text(json.dumps(structured, ensure_ascii=False, indent=2), encoding="utf-8")
-        if structured.get("analysis_notes"):
+        if ai_assessment_md.strip():
+            (paths.ai_dir / "AI评估.md").write_text(ai_assessment_md.strip() + "\n", encoding="utf-8")
+            register_file(db_path, data_dir, task_id, "ai_assessment_md", paths.ai_dir / "AI评估.md", viewable=True)
+        elif structured.get("analysis_notes"):
             (paths.ai_dir / "AI分析.md").write_text(str(structured["analysis_notes"]), encoding="utf-8")
         register_file(db_path, data_dir, task_id, "ai_structured_json", paths.ai_dir / "AI结构化结果.json", admin_only=True)
         with open_connection(db_path) as conn:
             conn.execute("UPDATE tasks SET status = 'generating_result', updated_at = ? WHERE id = ?", (utc_now(), task_id))
             conn.commit()
-        process = generate_result_files(db_path, data_dir, task_id, task, structured)
+        frozen_items = structured["frozen_items"]
+        process = generate_result_files(db_path, data_dir, task_id, task, structured, ai_assessment_md)
         with open_connection(db_path) as conn:
             target_check = process["estimates"]["target_check"]
             hit_status = target_check.get("hit_status")
             quality_flags = list(process.get("quality_warnings") or [])
-            quality_flags.extend(structured.get("quality_notes") or [])
+            quality_flags.extend(structured.get("review_notes") or structured.get("quality_notes") or [])
             conn.execute(
                 """
                 UPDATE tasks
@@ -508,7 +727,7 @@ def handle_ai_result(db_path: Path, data_dir: Path, task_id: str, user: dict[str
                 WHERE task_id = ?
                 """,
                 (
-                    len(structured["items"]),
+                    len(frozen_items),
                     process["item_count"],
                     process["estimates"]["work_days"]["middle"],
                     None if hit_status == "not_provided" else int(hit_status == "hit"),
@@ -529,10 +748,57 @@ def sanitize_error(error: dict[str, Any]) -> dict[str, str]:
     return {"code": str(error.get("code") or "model_call_error")[:80], "message": message[:500]}
 
 
-def extract_json(raw_response: Any) -> dict[str, Any]:
+def safe_ai_result_payload(payload: dict[str, Any]) -> Any:
+    data = payload["raw_response"] if payload.get("raw_response") is not None else payload
+    return redact_sensitive(data)
+
+
+def redact_sensitive(value: Any) -> Any:
+    blocked = {"apikey", "api_key", "authorization", "token"}
+    if isinstance(value, dict):
+        return {
+            key: "***"
+            if str(key).lower() in blocked
+            else redact_sensitive(child)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_sensitive(item) for item in value]
+    return value
+
+
+def extract_ai_response(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    structured = payload.get("structured_json")
+    if structured is not None:
+        if not isinstance(structured, dict):
+            raise FpaError("structured_json 必须是对象", 400, "json_validation")
+        assessment_md = payload.get("ai_assessment_md") or payload.get("analysis_md") or payload.get("AI评估.md") or ""
+        return str(assessment_md), structured
+
+    text = extract_raw_response_text(payload.get("raw_response"))
+    assessment_md = extract_tagged_block(text, "AI评估.md")
+    structured_text = extract_tagged_block(text, "AI结构化结果.json")
+    try:
+        parsed = json.loads(structured_text)
+    except json.JSONDecodeError as exc:
+        raise FpaError(f"AI结构化结果.json 解析失败: {exc.msg}", 400, "json_validation") from exc
+    if not isinstance(parsed, dict):
+        raise FpaError("AI结构化结果.json 必须是对象", 400, "json_validation")
+    return assessment_md, parsed
+
+
+def extract_tagged_block(text: str, tag: str) -> str:
+    pattern = rf"<{re.escape(tag)}>\s*(.*?)\s*</{re.escape(tag)}>"
+    match = re.search(pattern, text, flags=re.S)
+    if not match:
+        raise FpaError(f"模型响应中未找到 {tag} 区块", 400, "json_validation")
+    return match.group(1).strip()
+
+
+def extract_raw_response_text(raw_response: Any) -> str:
     if isinstance(raw_response, dict):
         content = raw_response.get("structured_json")
-        if isinstance(content, dict):
+        if isinstance(content, str):
             return content
         choices = raw_response.get("choices")
         if isinstance(choices, list) and choices:
@@ -542,20 +808,27 @@ def extract_json(raw_response: Any) -> dict[str, Any]:
             content = raw_response
     else:
         content = raw_response
-    if isinstance(content, dict):
-        return content
-    text = str(content or "")
-    match = re.search(r"\{.*\}", text, flags=re.S)
-    if not match:
-        raise FpaError("模型响应中未找到 JSON 对象", 400, "json_validation")
-    return json.loads(match.group(0))
+    if not isinstance(content, str) or not content.strip():
+        raise FpaError("模型响应正文为空", 400, "json_validation")
+    return content
 
 
-def validate_structured_json(data: Any, data_dir: Path) -> None:
+def validate_structured_json(
+    data: Any,
+    data_dir: Path,
+    *,
+    expected_system_code: str | None = None,
+    expected_system_name: str | None = None,
+) -> None:
     schema_file = data_dir / "modules" / "fpa" / "profile" / "schema" / "result.schema.json"
     try:
         schema = load_schema_json(schema_file, "result.schema.json")
-        validate_result(data, schema)
+        validate_result(
+            data,
+            schema,
+            expected_system_code=expected_system_code,
+            expected_system_name=expected_system_name,
+        )
     except AiResultValidationError as exc:
         raise FpaError(str(exc), 400, "json_validation") from exc
 
@@ -566,28 +839,36 @@ def generate_result_files(
     task_id: str,
     task: dict[str, Any],
     structured: dict[str, Any],
+    ai_assessment_md: str,
 ) -> dict[str, Any]:
     paths = task_paths(data_dir, task_id)
     target_days = task.get("target_person_days")
+    task_params = read_task_params(paths)
+    integrity_level = str(task_params.get("integrity_level") or DEFAULT_INTEGRITY_LEVEL)
+    frozen_items = structured["frozen_items"]
     payload = {
         "requirement_name": task["title"],
         "assessor": "TeamTools",
         "assessment_date": utc_now()[:10],
         "count_mode": "估算功能点",
         "target_work_days": None if target_days is None else float(target_days),
-        "project_features": {"count_timing": task["count_timing"]},
+        "project_features": {"count_timing": task["count_timing"], "integrity_level": integrity_level},
         "assessment_context": {
             "system_code": task["system_code"],
             "system_name": task["system_name"],
             "task_id": task_id,
             "no_knowledge_mode": bool(task.get("no_knowledge_mode")),
+            "ai_assessment_md": ai_assessment_md,
+            "ai_assessment_context": structured.get("assessment_context", {}),
+            "ai_project_features": structured.get("project_features", {}),
+            "review_notes": structured.get("review_notes", []),
             "ai_analysis_notes": structured.get("analysis_notes", ""),
             "uncounted_items": structured.get("uncounted_items", []),
             "quality_notes": structured.get("quality_notes", []),
             "coverage_notes": structured.get("coverage_notes", ""),
             "uncertainties": structured.get("uncertainties", []),
         },
-        "items": structured["items"],
+        "items": frozen_items,
     }
     payload_path = paths.runtime_dir / "Excel脚本输入payload.json"
     process_path = paths.runtime_dir / "FPA生成过程.json"
@@ -648,6 +929,7 @@ def rerun_task(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any]
     merged = paths.input_dir / "merged_input.md"
     if not merged.exists():
         raise FpaError("原任务输入文件不存在", 404, "rerun")
+    task_params = read_task_params(paths)
     return {
         "source_task_id": task_id,
         **create_task(
@@ -659,6 +941,7 @@ def rerun_task(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any]
             input_text=merged.read_text(encoding="utf-8"),
             target_person_days=task.get("target_person_days"),
             count_timing=task["count_timing"],
+            integrity_level=str(task_params.get("integrity_level") or DEFAULT_INTEGRITY_LEVEL),
             rerun_from_task_id=task_id,
         ),
     }

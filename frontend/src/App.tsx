@@ -5,6 +5,7 @@ type User = {
   username: string;
   display_name: string;
   role: 'user' | 'admin';
+  default_system_code?: string | null;
 };
 
 type SystemItem = {
@@ -43,23 +44,20 @@ type TaskDetail = {
   artifacts: {
     ai_analysis_md: { available: boolean; content?: string | null };
     fpa_process_json: { available: boolean; content?: unknown };
+    result_summary: { available: boolean; content?: ResultSummary | null };
     excel_result: { available: boolean; download_url: string };
   };
 };
 
-type FpaProcess = {
-  schema_version?: string;
+type ResultSummary = {
   item_count?: number;
-  target_work_days?: number | null;
-  estimates?: {
-    function_point_total?: number;
-    adjusted_fp_total?: number;
-    work_days?: { low?: number; middle?: number; high?: number };
-    target_check?: {
-      hit_status?: string;
-      difference_days?: number | null;
-      difference_ratio?: number | null;
-    };
+  function_point_total?: number;
+  adjusted_fp_total?: number;
+  work_days?: { low?: number; middle?: number; high?: number };
+  target_check?: {
+    hit_status?: string;
+    difference_days?: number | null;
+    difference_ratio?: number | null;
   };
   quality_gate?: {
     status?: string;
@@ -69,13 +67,9 @@ type FpaProcess = {
     reason_codes?: string[];
   };
   quality_warnings?: Array<{ code?: string; level?: string; message?: string; suggestion?: string }>;
-  assessment_context?: {
-    ai_analysis_notes?: string;
-    uncounted_items?: Array<{ description?: string; reason?: string; related_requirement_section?: string }>;
-    quality_notes?: Array<{ code?: string; message?: string; severity?: string }>;
-    coverage_notes?: string;
-    uncertainties?: unknown[];
-  };
+  review_notes?: Array<{ code?: string; message?: string; severity?: string }>;
+  uncounted_items?: Array<{ description?: string; reason?: string; related_requirement_section?: string }>;
+  coverage_notes?: string;
 };
 
 type AiRequest = {
@@ -87,7 +81,40 @@ type AiRequest = {
   generation_config?: Record<string, unknown>;
 };
 
-const countTimingOptions = ['估算早期', '估算中期', '估算晚期'];
+type SystemRelevance = {
+  status: 'pass' | 'warning' | 'blocked';
+  confirmed?: boolean;
+  selected_system_code?: string;
+  selected_system_name?: string;
+  best_match_system_code?: string;
+  best_match_system_name?: string;
+  selected_score?: number;
+  best_match_score?: number;
+  message?: string;
+};
+
+type AiRequestResponse = {
+  ai_request: AiRequest;
+  system_relevance?: SystemRelevance;
+};
+
+const countTimingOptions = [
+  { value: '估算早期', label: '1.39 估算早期' },
+  { value: '估算中期', label: '1.21 估算中期' },
+  { value: '估算晚期', label: '1.10 估算晚期' },
+  { value: '项目交付后及运维阶段', label: '1.00 项目交付后及运维阶段' },
+];
+const integrityLevelOptions = [
+  { value: '没有明确的完整性级别或等级为C/D', label: '1.00 没有明确的完整性级别或等级为C/D' },
+  {
+    value: '完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式',
+    label: '1.10 完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式',
+  },
+  {
+    value: '完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施',
+    label: '1.30 完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施',
+  },
+];
 const DEEPSEEK_KEY_STORAGE = 'teamtools:fpa:deepseek-key';
 
 export default function App() {
@@ -148,7 +175,7 @@ function Router({
     return <HomePage navigate={navigate} />;
   }
   if (path === '/fpa/submit') {
-    return <SubmitPage navigate={navigate} setNotice={setNotice} />;
+    return <SubmitPage user={user} navigate={navigate} setNotice={setNotice} />;
   }
   if (path.startsWith('/fpa/tasks/')) {
     return <DetailPage taskId={decodeURIComponent(path.split('/').pop() || '')} navigate={navigate} setNotice={setNotice} />;
@@ -370,7 +397,7 @@ function TasksPage({
                 <tr key={task.id}>
                   <td><button className="link-button" onClick={() => navigate(`/fpa/tasks/${task.id}`)}>{task.title}</button></td>
                   <td>{task.system_name}</td>
-                  <td><span className={`status ${statusTone(task.status)}`}>{task.status_label}</span></td>
+                  <td><span className={`status ${statusTone(task.status)}`}>{displayStatusLabel(task.status)}</span></td>
                   <td>{formatTime(task.created_at)}</td>
                   <td>{formatTime(task.finished_at)}</td>
                   <td>{dash(task.target_person_days)}</td>
@@ -393,12 +420,13 @@ function TasksPage({
   );
 }
 
-function SubmitPage({ navigate, setNotice }: { navigate: (path: string) => void; setNotice: (value: string) => void }) {
+function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path: string) => void; setNotice: (value: string) => void }) {
   const [systems, setSystems] = useState<SystemItem[]>([]);
   const [systemCode, setSystemCode] = useState('');
   const [title, setTitle] = useState('');
   const [targetDays, setTargetDays] = useState('');
-  const [countTiming, setCountTiming] = useState('估算早期');
+  const [countTiming, setCountTiming] = useState('估算中期');
+  const [integrityLevel, setIntegrityLevel] = useState('完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式');
   const [inputText, setInputText] = useState('');
   const [fileText, setFileText] = useState('');
   const [fileName, setFileName] = useState('');
@@ -408,10 +436,13 @@ function SubmitPage({ navigate, setNotice }: { navigate: (path: string) => void;
     api('/api/fpa/systems')
       .then((data) => {
         setSystems(data.items);
-        setSystemCode(data.items[0]?.code || '');
+        const preferred = data.items.some((item: SystemItem) => item.code === user.default_system_code)
+          ? user.default_system_code
+          : data.items[0]?.code || '';
+        setSystemCode(preferred || '');
       })
       .catch((err) => setError(err instanceof Error ? err.message : '系统列表加载失败'));
-  }, []);
+  }, [user.default_system_code]);
 
   async function readFile(file: File | undefined) {
     if (!file) return;
@@ -437,6 +468,7 @@ function SubmitPage({ navigate, setNotice }: { navigate: (path: string) => void;
     form.set('uploaded_text', fileText);
     form.set('uploaded_name', fileName);
     form.set('count_timing', countTiming);
+    form.set('integrity_level', integrityLevel);
     if (targetDays) form.set('target_person_days', targetDays);
     try {
       const data = await api('/api/fpa/tasks', {
@@ -479,7 +511,13 @@ function SubmitPage({ navigate, setNotice }: { navigate: (path: string) => void;
             <label className="field">
               <span>规模计数时机</span>
               <select value={countTiming} onChange={(event) => setCountTiming(event.target.value)}>
-                {countTimingOptions.map((item) => <option key={item}>{item}</option>)}
+                {countTimingOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              <span>完整性级别</span>
+              <select value={integrityLevel} onChange={(event) => setIntegrityLevel(event.target.value)}>
+                {integrityLevelOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
           </div>
@@ -552,11 +590,12 @@ function DetailPage({
   if (!detail) return <section className="panel">加载中...</section>;
 
   const task = detail.task;
-  const process = detail.artifacts.fpa_process_json.content as FpaProcess | undefined;
-  const middleDays = process?.estimates?.work_days?.middle ?? task.result_median_person_days;
-  const functionPoints = process?.estimates?.function_point_total;
-  const adjustedFp = process?.estimates?.adjusted_fp_total;
-  const targetStatus = process?.estimates?.target_check?.hit_status;
+  const summary = detail.artifacts.result_summary.content;
+  const displayLabel = displayStatusLabel(task.status);
+  const middleDays = summary?.work_days?.middle ?? task.result_median_person_days;
+  const functionPoints = summary?.function_point_total;
+  const adjustedFp = summary?.adjusted_fp_total;
+  const targetStatus = summary?.target_check?.hit_status;
 
   return (
     <>
@@ -574,7 +613,7 @@ function DetailPage({
       </div>
 
       <section className="summary-strip">
-        <div><span>当前状态</span><strong><span className={`status ${statusTone(task.status)}`}>{task.status_label}</span></strong></div>
+        <div><span>当前状态</span><strong><span className={`status ${statusTone(task.status)}`}>{displayLabel}</span></strong></div>
         <div><span>目标人天</span><strong>{dash(task.target_person_days)}</strong></div>
         <div><span>结果中值</span><strong>{dash(middleDays)}</strong></div>
         <div><span>目标校验</span><strong>{targetStatus ? targetHitLabel(targetStatus) : task.target_hit == null ? '-' : task.target_hit ? '命中' : '未命中'}</strong></div>
@@ -587,7 +626,7 @@ function DetailPage({
           <article className="panel ai-panel">
             <div className="panel-heading">
               <h2>AI 调用区</h2>
-              <span className={`status ${statusTone(task.status)}`}>{task.status_label}</span>
+              <span className={`status ${statusTone(task.status)}`}>{displayLabel}</span>
             </div>
             <p className="subtle">{nextStepText(task.status)}</p>
           </article>
@@ -598,13 +637,13 @@ function DetailPage({
         <article className="panel">
           <div className="panel-heading">
             <h2>状态进度</h2>
-            <span className={`status ${statusTone(task.status)}`}>{task.status_label}</span>
+            <span className={`status ${statusTone(task.status)}`}>{displayLabel}</span>
           </div>
           <ol className="progress-list">
-            {['任务创建', 'AI请求包已生成', '等待AI调用', '结果校验中', '生成结果中', task.status_label].map((label, index) => (
+            {progressLabels(task.status).map((label, index) => (
               <li key={`${label}-${index}`} className={progressClass(task.status, index)}>
                 <strong>{label}</strong>
-                <span>{progressText(index)}</span>
+                <span>{progressText(label)}</span>
               </li>
             ))}
           </ol>
@@ -614,7 +653,7 @@ function DetailPage({
           functionPoints={functionPoints}
           adjustedFp={adjustedFp}
           middleDays={middleDays}
-          qualityGate={process?.quality_gate}
+          qualityGate={summary?.quality_gate}
         />
       </section>
 
@@ -624,11 +663,11 @@ function DetailPage({
             <h2>结果摘要</h2>
             {detail.artifacts.excel_result.available && <a className="button primary" href={detail.artifacts.excel_result.download_url}>下载 Excel</a>}
           </div>
-          <ProcessReview process={process} fallback={{ status: task.status, error_summary: task.error_summary }} />
+          <ResultSummaryReview summary={summary} status={task.status} errorSummary={task.error_summary} />
         </article>
         <article className="panel">
-          <div className="panel-heading"><h2>AI 分析</h2></div>
-          <pre>{process?.assessment_context?.ai_analysis_notes || detail.artifacts.ai_analysis_md.content || task.error_summary || '暂无分析内容'}</pre>
+          <div className="panel-heading"><h2>AI评估.md</h2></div>
+          <pre>{detail.artifacts.ai_analysis_md.content || (task.status === 'failed' ? task.error_summary : '') || 'AI评估说明待生成'}</pre>
         </article>
       </section>
     </>
@@ -644,7 +683,7 @@ function ResultMetricsCard({
   functionPoints?: number;
   adjustedFp?: number;
   middleDays?: number | null;
-  qualityGate?: FpaProcess['quality_gate'];
+  qualityGate?: ResultSummary['quality_gate'];
 }) {
   return (
     <article className="panel">
@@ -662,20 +701,29 @@ function ResultMetricsCard({
   );
 }
 
-function ProcessReview({ process, fallback }: { process?: FpaProcess; fallback: unknown }) {
-  if (!process) return <JsonBlock data={fallback} />;
-  const context = process.assessment_context || {};
+function ResultSummaryReview({
+  summary,
+  status,
+  errorSummary,
+}: {
+  summary?: ResultSummary | null;
+  status: string;
+  errorSummary?: string | null;
+}) {
+  if (!summary) {
+    return <p className="subtle">{status === 'failed' ? errorSummary || '评估失败，请复制任务重新生成。' : '结果摘要待生成。'}</p>;
+  }
   return (
     <div className="review-stack">
       <div className="metric-grid">
-        <div><span>质量门槛</span><strong>{qualityGateLabel(process.quality_gate?.status)}</strong></div>
-        <div><span>功能点条目</span><strong>{dash(process.item_count)}</strong></div>
-        <div><span>目标差异</span><strong>{dash(process.estimates?.target_check?.difference_days)}</strong></div>
+        <div><span>质量门槛</span><strong>{qualityGateLabel(summary.quality_gate?.status)}</strong></div>
+        <div><span>功能点条目</span><strong>{dash(summary.item_count)}</strong></div>
+        <div><span>目标差异</span><strong>{dash(summary.target_check?.difference_days)}</strong></div>
       </div>
 
       <ReviewList
         title="质量提示"
-        items={(process.quality_warnings || []).map((item) => ({
+        items={(summary.quality_warnings || []).map((item) => ({
           title: item.code || item.level || 'QUALITY',
           body: [item.message, item.suggestion].filter(Boolean).join(' '),
         }))}
@@ -683,7 +731,7 @@ function ProcessReview({ process, fallback }: { process?: FpaProcess; fallback: 
       />
       <ReviewList
         title="AI 复核提示"
-        items={(context.quality_notes || []).map((item) => ({
+        items={(summary.review_notes || []).map((item) => ({
           title: item.code || item.severity || 'NOTE',
           body: item.message || '',
         }))}
@@ -691,19 +739,18 @@ function ProcessReview({ process, fallback }: { process?: FpaProcess; fallback: 
       />
       <ReviewList
         title="未计数项"
-        items={(context.uncounted_items || []).map((item) => ({
+        items={(summary.uncounted_items || []).map((item) => ({
           title: item.description || '未计数项',
           body: [item.reason, item.related_requirement_section].filter(Boolean).join(' · '),
         }))}
         empty="暂无未计数项。"
       />
-      {context.coverage_notes && (
+      {summary.coverage_notes && (
         <div className="review-note">
           <strong>覆盖说明</strong>
-          <p>{context.coverage_notes}</p>
+          <p>{summary.coverage_notes}</p>
         </div>
       )}
-      {Boolean(context.uncertainties?.length) && <JsonBlock data={{ uncertainties: context.uncertainties }} />}
     </div>
   );
 }
@@ -726,6 +773,8 @@ function AiCallPanel({ taskId, onDone, setNotice }: { taskId: string; onDone: ()
   const [apiKey, setApiKey] = useState('');
   const [remember, setRemember] = useState(false);
   const [aiRequest, setAiRequest] = useState<AiRequest | null>(null);
+  const [systemRelevance, setSystemRelevance] = useState<SystemRelevance | null>(null);
+  const [relevanceConfirmed, setRelevanceConfirmed] = useState(false);
   const [calling, setCalling] = useState(false);
   const [error, setError] = useState('');
 
@@ -744,10 +793,17 @@ function AiCallPanel({ taskId, onDone, setNotice }: { taskId: string; onDone: ()
     }
   }
 
-  async function fetchRequest() {
-    const data = await api(`/api/fpa/tasks/${taskId}/ai-request`);
+  async function fetchRequest(): Promise<AiRequestResponse> {
+    const data = await api(`/api/fpa/tasks/${taskId}/ai-request`) as AiRequestResponse;
     setAiRequest(data.ai_request);
-    setNotice('AI 请求包已获取');
+    setSystemRelevance(data.system_relevance || null);
+    if (data.system_relevance && ['warning', 'blocked'].includes(data.system_relevance.status) && !data.system_relevance.confirmed) {
+      setError(data.system_relevance.message || '系统选择可能与需求不匹配，请确认是否继续。');
+    } else {
+      setError('');
+      setNotice('AI 请求包已获取');
+    }
+    return data;
   }
 
   async function callDeepSeek() {
@@ -756,10 +812,14 @@ function AiCallPanel({ taskId, onDone, setNotice }: { taskId: string; onDone: ()
       setError('请先输入 DeepSeek API Key');
       return;
     }
-    if (!aiRequest) {
-      await fetchRequest();
+    const requestData = aiRequest ? { ai_request: aiRequest, system_relevance: systemRelevance || undefined } : await fetchRequest();
+    const relevance = requestData.system_relevance;
+    if (relevance && ['warning', 'blocked'].includes(relevance.status) && !relevance.confirmed && !relevanceConfirmed) {
+      setSystemRelevance(relevance);
+      setError(relevance.message || '系统选择可能与需求不匹配，请确认是否继续。');
+      return;
     }
-    const request = aiRequest || (await api(`/api/fpa/tasks/${taskId}/ai-request`)).ai_request;
+    const request = requestData.ai_request;
     setCalling(true);
     setError('');
     if (remember) {
@@ -774,7 +834,6 @@ function AiCallPanel({ taskId, onDone, setNotice }: { taskId: string; onDone: ()
           ? request.messages
           : [{ role: 'user', content: request.plain_prompt || '' }],
         temperature: request.generation_config?.temperature ?? 0.2,
-        response_format: { type: 'json_object' },
       };
       const response = await fetch('https://api.deepseek.com/chat/completions', {
         method: 'POST',
@@ -788,12 +847,19 @@ function AiCallPanel({ taskId, onDone, setNotice }: { taskId: string; onDone: ()
       if (!response.ok) {
         throw new Error(raw?.error?.message || `DeepSeek HTTP ${response.status}`);
       }
-      await api(`/api/fpa/tasks/${taskId}/ai-result`, {
+      const result = await api(`/api/fpa/tasks/${taskId}/ai-result`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ success: true, provider: 'deepseek', model: request.model, raw_response: raw }),
       });
-      setNotice('AI 结果已回传，Excel 已生成');
+      const status = result?.task?.status;
+      if (status === 'completed') {
+        setNotice('AI 结果已回传，Excel 已生成');
+      } else if (status === 'failed') {
+        setNotice('AI 结果校验失败，请查看错误摘要或复制任务重跑');
+      } else {
+        setNotice(`AI 结果已回传，当前状态：${displayStatusLabel(status || '')}`);
+      }
       await onDone();
     } catch (err) {
       const message = err instanceof TypeError ? 'Failed to fetch：可能是 CORS 或网络问题' : err instanceof Error ? err.message : '模型调用失败';
@@ -813,6 +879,18 @@ function AiCallPanel({ taskId, onDone, setNotice }: { taskId: string; onDone: ()
     await onDone();
   }
 
+  async function confirmSystemRelevance() {
+    const data = await api(`/api/fpa/tasks/${taskId}/system-relevance/confirm`, { method: 'POST' });
+    setSystemRelevance(data.system_relevance || null);
+    setRelevanceConfirmed(true);
+    setError('');
+    setNotice('已确认按当前系统继续评估');
+  }
+
+  const needsSystemConfirm = Boolean(
+    systemRelevance && ['warning', 'blocked'].includes(systemRelevance.status) && !systemRelevance.confirmed && !relevanceConfirmed,
+  );
+
   return (
     <article className="panel ai-panel">
       <div className="panel-heading">
@@ -829,17 +907,14 @@ function AiCallPanel({ taskId, onDone, setNotice }: { taskId: string; onDone: ()
       </label>
       <div className="actions">
         <button className="button" onClick={fetchRequest}>获取 AI 请求包</button>
+        {needsSystemConfirm && <button className="button" onClick={confirmSystemRelevance}>仍然继续</button>}
         <button className="button primary" onClick={callDeepSeek} disabled={calling}>{calling ? '调用中...' : '浏览器调用 DeepSeek'}</button>
-        {error && <button className="button danger" onClick={confirmFailure}>确认失败并回传</button>}
+        {error && !needsSystemConfirm && <button className="button danger" onClick={confirmFailure}>确认失败并回传</button>}
       </div>
       {aiRequest && <pre>{JSON.stringify({ provider: aiRequest.provider, model: aiRequest.model, request_format: aiRequest.request_format }, null, 2)}</pre>}
       {error && <div className="form-alert is-error">{error}</div>}
     </article>
   );
-}
-
-function JsonBlock({ data }: { data: unknown }) {
-  return <pre>{JSON.stringify(data || {}, null, 2)}</pre>;
 }
 
 async function api(path: string, init?: RequestInit) {
@@ -890,28 +965,43 @@ function statusTone(status: string) {
   return 'running';
 }
 
+function displayStatusLabel(status: string) {
+  if (status === 'completed') return '评估完成';
+  if (status === 'failed') return '评估失败';
+  if (status === 'canceled' || status === 'cancelled') return '已取消';
+  if (status === 'validating_result' || status === 'generating_result') return '生成结果中';
+  return 'AI评估中';
+}
+
+function progressLabels(status: string) {
+  const terminal = status === 'failed' ? '评估失败' : status === 'canceled' || status === 'cancelled' ? '已取消' : '评估完成';
+  return ['提交需求', 'AI评估中', '生成结果中', terminal];
+}
+
 function progressClass(status: string, index: number) {
-  const map: Record<string, number> = {
-    waiting_ai_call: 2,
-    validating_result: 3,
-    generating_result: 4,
-    completed: 5,
-    failed: 5,
-    canceled: 5,
+  const activeMap: Record<string, number> = {
+    waiting_ai_call: 1,
+    validating_result: 2,
+    generating_result: 2,
+    completed: 3,
+    failed: 3,
+    canceled: 3,
+    cancelled: 3,
   };
-  const active = map[status] ?? 0;
+  const active = activeMap[status] ?? 1;
   if (index < active) return 'done';
   if (index === active) return 'active';
   return '';
 }
 
-function progressText(index: number) {
-  return [
-    '接收任务和输入内容',
-    '后端已生成模型请求内容',
-    '浏览器使用本地 API Key 调用模型',
-    '后端校验 AI 结构化 JSON',
-    '后端写入 Excel 输出',
-    '输出最终状态',
-  ][index];
+function progressText(label: string) {
+  const map: Record<string, string> = {
+    提交需求: '已接收需求和任务参数',
+    AI评估中: '浏览器调用模型并回传评估结果',
+    生成结果中: '后端生成摘要和 Excel',
+    评估完成: '结果已生成，可下载 Excel',
+    评估失败: '评估失败，可复制任务重新生成',
+    已取消: '任务已取消',
+  };
+  return map[label] || '';
 }

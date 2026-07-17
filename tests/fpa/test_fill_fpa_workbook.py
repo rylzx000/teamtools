@@ -93,7 +93,7 @@ class FillFpaWorkbookTest(unittest.TestCase):
             self.run_script(SAMPLE_PAYLOAD_PATH, output_path, process_path)
             self.assert_basic_workbook_contract(output_path, process_path, SAMPLE_PAYLOAD_PATH)
 
-    def test_project_features_preserve_template_defaults_except_c1(self):
+    def test_project_features_preserve_template_defaults_except_c1_and_c7(self):
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             output_path = temp_dir / "fpa-review.xlsx"
@@ -108,8 +108,12 @@ class FillFpaWorkbookTest(unittest.TestCase):
 
             payload = json.loads(SAMPLE_PAYLOAD_PATH.read_text(encoding="utf-8"))
             expected_c1 = payload["project_features"]["规模计数时机"]
+            expected_c7 = payload["project_features"]["完整性级别"]
             self.assertEqual(generated_project["C1"].value, expected_c1)
+            self.assertEqual(generated_project["C7"].value, expected_c7)
             for row in range(2, 11):
+                if row == 7:
+                    continue
                 self.assertEqual(
                     generated_project[f"C{row}"].value,
                     template_project[f"C{row}"].value,
@@ -118,7 +122,7 @@ class FillFpaWorkbookTest(unittest.TestCase):
             for forbidden_value in ["中等", "3GL"]:
                 self.assertNotIn(
                     forbidden_value,
-                    [generated_project[f"C{row}"].value for row in range(3, 10)],
+                    [generated_project[f"C{row}"].value for row in range(3, 10) if row != 7],
                 )
 
     def test_eleven_items_dynamic_rows_and_structured_remarks(self):

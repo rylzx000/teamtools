@@ -17,6 +17,7 @@ from .db import fetch_one, initialize_database, open_connection, task_count, utc
 from .modules.fpa.service import (
     FpaError,
     cancel_task,
+    confirm_system_relevance,
     create_task,
     download_excel_path,
     ensure_resources,
@@ -146,7 +147,11 @@ def create_app(
             uploaded_text=str(payload.get("uploaded_text") or ""),
             uploaded_name=str(payload.get("uploaded_name") or ""),
             target_person_days=target,
-            count_timing=str(payload.get("count_timing") or "估算早期"),
+            count_timing=str(payload.get("count_timing") or "估算中期"),
+            integrity_level=str(
+                payload.get("integrity_level")
+                or "完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式"
+            ),
         )
 
     @app.get("/api/fpa/tasks")
@@ -160,6 +165,10 @@ def create_app(
     @app.get("/api/fpa/tasks/{task_id}/ai-request")
     async def fpa_get_ai_request(request: Request, task_id: str) -> dict[str, Any]:
         return fetch_ai_request(app_db_path, app_data_dir, task_id, require_user(request))
+
+    @app.post("/api/fpa/tasks/{task_id}/system-relevance/confirm")
+    async def fpa_confirm_system_relevance(request: Request, task_id: str) -> dict[str, Any]:
+        return confirm_system_relevance(app_db_path, app_data_dir, task_id, require_user(request))
 
     @app.post("/api/fpa/tasks/{task_id}/ai-result")
     async def fpa_post_ai_result(request: Request, task_id: str) -> dict[str, Any]:
@@ -233,6 +242,7 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
         "username": user["username"],
         "display_name": user["display_name"],
         "role": user["role"],
+        "default_system_code": user.get("default_system_code"),
     }
 
 
