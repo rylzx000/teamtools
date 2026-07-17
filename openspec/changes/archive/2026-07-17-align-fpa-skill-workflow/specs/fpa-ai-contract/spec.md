@@ -39,6 +39,8 @@
 - **THEN** 后端和 Excel 脚本不得在生成阶段临时新增、删除、改名、重排或改变功能点类型
 - **AND** 如需调整业务拆分，必须重新生成或重新提交 AI 结构化结果
 
+## ADDED Requirements
+
 ### Requirement: AI 结果系统绑定与编号格式
 
 系统 MUST 以当前任务选择的系统作为 AI 结构化结果的权威系统边界。`assessment_context.system_code` 必须等于当前任务系统编码，`assessment_context.system_name` 必须等于当前任务系统中文名，且 `frozen_items[].system` 必须等于当前任务系统中文名。系统 MUST 对所有追溯编号及引用编号执行格式强校验：`change_facts[].fact_id` 匹配 `^F-[0-9]{3}$`，`routing_decisions[].route_id` 匹配 `^R-[0-9]{3}$`，`split_merge_decisions[].decision_id` 匹配 `^D-[0-9]{3}$`，`frozen_items[].stable_id` 匹配 `^FP-[0-9]{3}$`；`routing_decisions[].fact_ids[]`、`split_merge_decisions[].route_ids[]`、`split_merge_decisions[].result_stable_ids[]`、`frozen_items[].fact_ids[]` 和 `frozen_items[].route_ids[]` 也必须符合对应格式。
@@ -53,6 +55,8 @@
 - **WHEN** AI 结构化结果中的事实、路由、决策或冻结项编号引用关系完整，但编号格式不是规定格式
 - **THEN** 后端校验失败
 - **AND** 后端不得生成 Excel
+
+## MODIFIED Requirements
 
 ### Requirement: 目标人天和项目特征优先级
 

@@ -1,6 +1,6 @@
 workflow: full
 language: zh-CN
-phase: open
+phase: archive
 context_compression: off
 build_mode: null
 build_pause: null
@@ -13,9 +13,9 @@ auto_transition: true
 base_ref: 7836faf937980cedef986176194130217f89ed7f
 design_doc: null
 plan: null
-verify_result: pending
+verify_result: pass
 verification_report: null
 branch_status: pending
 created_at: 2026-07-16
 verified_at: null
-archived: false
+archived: true
