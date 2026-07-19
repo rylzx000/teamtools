@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FPA 查看详情 - TeamTools</title>
+  <link rel="stylesheet" href="teamtools.css" />
+  <script src="teamtools.js" defer></script>
+</head>
+<body data-page="detail">
+  <div class="app-shell">
+    <main class="main-shell">
+      <header class="topbar">
+        <div class="topbar-module">
+          <span class="nav-dot"></span>
+          <strong>FPA 工作量评估</strong>
+        </div>
+        <div class="topbar-user">
+          <span>王明</span>
+          <span class="role-pill">管理员</span>
+          <button class="text-button" type="button">退出登录</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <nav class="module-tabs" aria-label="FPA 页面导航">
+          <a class="module-tab" href="fpa-tasks.html">任务列表</a>
+          <a class="module-tab" href="fpa-submit.html">提交评估</a>
+          <span class="module-tab active">查看详情</span>
+        </nav>
+
+        <div class="page-title-row">
+          <div>
+            <h1>最新任务详情</h1>
+          </div>
+          <div class="actions">
+            <button class="button" type="button" data-copy-task>复制任务 ID</button>
+            <a class="button" href="fpa-tasks.html">返回任务列表</a>
+          </div>
+        </div>
+          <p class="detail-task-meta subtle">交易审批流程改造 · 任务 ID：<span data-task-id>TASK-202606-014</span> · 车险理赔核心系统 · 06-27 09:12</p>
+
+        <section class="detail-grid">
+          <article class="panel">
+            <div class="panel-heading">
+              <h2>状态进度</h2>
+              <span class="status running">运行中</span>
+            </div>
+            <ol class="progress-list">
+              <li class="done"><strong>任务创建</strong><span>接收任务和输入内容</span></li>
+              <li class="done"><strong>AI请求包已生成</strong><span>后端已生成模型请求内容</span></li>
+              <li class="active"><strong>等待AI调用</strong><span>浏览器使用本地 API Key 调用模型</span></li>
+              <li><strong>结果校验中</strong><span>后端校验 AI 结构化 JSON</span></li>
+              <li><strong>生成结果中</strong><span>后端写入 Excel 模板</span></li>
+              <li><strong>已完成 / 失败 / 已取消</strong><span>输出最终状态</span></li>
+            </ol>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <h2>任务摘要</h2>
+              <button class="button small" type="button" disabled>Excel 生成后可下载</button>
+            </div>
+            <section class="summary-strip vertical">
+              <div><span>目标人天</span><strong>18.0</strong></div>
+              <div><span>结果中值</span><strong>—</strong></div>
+              <div><span>是否命中目标</span><strong>—</strong></div>
+              <div><span>耗时</span><strong>约 3 分钟</strong></div>
+            </section>
+          </article>
+        </section>
+
+        <section class="detail-grid lower single">
+          <article class="panel">
+            <div class="panel-heading">
+              <h2>结果查看</h2>
+            </div>
+            <div class="artifact-list compact-artifacts">
+              <details class="artifact-item" open>
+                <summary>AI分析.md 预览 · 复制</summary>
+                <pre>回传结果并校验通过后，在此展示 Markdown 摘要预览；普通用户可查看和复制，不提供下载。</pre>
+              </details>
+              <details class="artifact-item">
+                <summary>FPA生成过程.json 预览 · 复制</summary>
+                <pre>{
+  "taskId": "TASK-202606-014",
+  "stage": "WAITING_AI_CALL",
+  "result": null
+}</pre>
+              </details>
+            </div>
+          </article>
+        </section>
+
+        <details class="panel fold-panel">
+          <summary>
+            <span>
+              <strong>管理员与失败排查</strong>
+              <small>默认收起；仅排错时展开</small>
+            </span>
+            <span class="status muted">当前未失败</span>
+          </summary>
+          <div class="failure-grid">
+            <div><span>失败阶段</span><strong>—</strong></div>
+            <div><span>脱敏原因</span><strong>—</strong></div>
+            <div><span>建议操作</span><strong>失败时展示重试、复制并重新生成或联系管理员。</strong></div>
+          </div>
+          <details class="artifact-item manual-call">
+            <summary>手动处理</summary>
+            <p class="helper-text" data-ai-call-note>仅在未配置 API Key、自动调用失败或需要重试时使用；正常流程无需操作。</p>
+            <div class="actions ai-actions">
+              <button class="button primary" type="button" data-ai-action="call">调用模型</button>
+              <button class="button" type="button" data-ai-action="recall">重新调用</button>
+              <button class="button" type="button" data-ai-action="return">回传结果</button>
+            </div>
+          </details>
+          <details class="artifact-item task-actions-fold">
+            <summary>任务操作</summary>
+            <div class="actions detail-task-actions">
+              <button class="button danger" type="button">取消任务</button>
+              <button class="button" type="button">复制并重新生成</button>
+            </div>
+          </details>
+          <details class="artifact-item quality-fold">
+            <summary>质量与校验详情</summary>
+            <div class="quality-list compact-quality">
+              <span class="quality-chip neutral">无资料模式：否</span>
+              <span class="quality-chip neutral">资源文件可读取：是</span>
+              <span class="quality-chip neutral">目标异常：未触发</span>
+              <span class="quality-chip warn">条目过多：待确认</span>
+              <span class="quality-chip neutral">AI 调用失败：否</span>
+              <span class="quality-chip neutral">JSON 校验失败：否</span>
+            </div>
+          </details>
+          <div class="admin-diagnostics">
+            <h3>管理员排查信息</h3>
+            <div class="quality-list">
+              <span class="quality-chip neutral">AI 请求摘要</span>
+              <span class="quality-chip neutral">AI 原始响应</span>
+              <span class="quality-chip neutral">AI 调用错误</span>
+              <span class="quality-chip neutral">JSON 校验错误</span>
+              <span class="quality-chip neutral">完整任务日志入口</span>
+              <span class="quality-chip neutral">异常堆栈摘要</span>
+              <span class="quality-chip neutral">工作目录相对路径</span>
+            </div>
+            <div class="artifact-list compact-artifacts">
+              <details class="artifact-item">
+                <summary>AI请求摘要.json 折叠预览</summary>
+                <pre>{ "provider": "DeepSeek", "model": "deepseek-v4-flash", "payloadStatus": "generated" }</pre>
+              </details>
+              <details class="artifact-item">
+                <summary>AI结构化结果.json 折叠预览</summary>
+                <pre>{ "status": "waiting_return", "items": [] }</pre>
+              </details>
+              <details class="artifact-item">
+                <summary>AI调用错误.json 失败时展示</summary>
+                <pre>{ "error": null }</pre>
+              </details>
+              <details class="artifact-item">
+                <summary>task.log 日志入口摘要</summary>
+                <pre>仅管理员查看脱敏摘要；不展示完整日志、环境变量或服务器敏感路径。</pre>
+              </details>
+            </div>
+            <p class="helper-text">普通用户不可见模型 API Key、服务器敏感路径、完整源码路径、环境变量、完整日志和其他用户任务内容。</p>
+          </div>
+        </details>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

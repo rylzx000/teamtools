@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>提交 FPA 评估 - TeamTools</title>
+  <link rel="stylesheet" href="teamtools.css" />
+  <script src="teamtools.js" defer></script>
+</head>
+<body data-page="submit">
+  <div class="app-shell">
+    <main class="main-shell">
+      <header class="topbar">
+        <div class="topbar-module">
+          <span class="nav-dot"></span>
+          <strong>FPA 工作量评估</strong>
+        </div>
+        <div class="topbar-user">
+          <span>王明</span>
+          <span class="role-pill">管理员</span>
+          <button class="text-button" type="button">退出登录</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <nav class="module-tabs" aria-label="FPA 页面导航">
+          <a class="module-tab" href="fpa-tasks.html">任务列表</a>
+          <a class="module-tab active" href="fpa-submit.html">提交评估</a>
+          <a class="module-tab" href="fpa-detail.html">查看详情</a>
+        </nav>
+
+        <div class="page-title-row compact-title">
+          <h1>提交评估</h1>
+        </div>
+
+        <form class="form-panel" data-submit-form novalidate>
+          <div class="form-main">
+            <div class="field-grid">
+              <label class="field">
+                <span>系统选择</span>
+                <select name="system" required data-config-select="systems">
+                  <option value="">请选择系统</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>规模计数时机</span>
+                <select name="countTiming" data-config-select="countTimings"></select>
+              </label>
+              <label class="field">
+                <span>完整性级别</span>
+                <select name="completenessLevel" data-config-select="completenessLevels"></select>
+              </label>
+              <label class="field field-target-days">
+                <span>目标人天</span>
+                <input name="targetDays" inputmode="decimal" placeholder="如 8.5" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>需求名称</span>
+              <input name="taskName" placeholder="可选，为空时由后端自动生成" />
+            </label>
+
+            <label class="field">
+              <span>粘贴 Markdown 内容</span>
+              <textarea class="markdown-input" name="markdown" maxlength="20000" placeholder="在这里粘贴需求 Markdown、流程说明、接口说明或评审记录。"></textarea>
+              <small><strong data-char-count>0</strong> / 20000 字符</small>
+            </label>
+
+            <label class="upload-box" data-upload-dropzone>
+              <input name="mdFile" type="file" accept=".md,text/markdown,text/plain" />
+              <span class="upload-icon" aria-hidden="true">MD</span>
+              <span>
+                <strong>拖动 .md 文件到这里，或点击选择文件</strong>
+                <small data-file-note>文件不超过 256KB；可与粘贴内容同时提交。</small>
+              </span>
+            </label>
+
+          </div>
+
+          <aside class="rule-panel">
+            <h2>提交规则</h2>
+            <ul class="rule-list">
+              <li>粘贴内容和上传文件至少提供一个。</li>
+              <li>文本 ≤ 2 万字符，文件 ≤ 256KB。</li>
+              <li>目标人天最多 1 位小数。</li>
+            </ul>
+            <div class="form-alert" data-form-alert hidden></div>
+            <div class="form-actions">
+              <button class="button primary" type="submit">提交</button>
+            </div>
+            <section class="model-panel model-panel-side" aria-label="模型调用设置">
+              <div class="panel-heading compact">
+                <h2>模型调用设置</h2>
+                <span class="status muted">本机使用</span>
+              </div>
+              <p class="model-brief">DeepSeek · deepseek-v4-flash</p>
+              <div class="model-grid">
+                <input name="modelProvider" value="DeepSeek" readonly hidden />
+                <input name="modelName" value="deepseek-v4-flash" readonly hidden />
+                <label class="field model-key">
+                  <span>API Key</span>
+                  <input name="apiKey" type="password" autocomplete="off" placeholder="本地 DeepSeek API Key" data-api-key />
+                </label>
+              </div>
+              <label class="check-line">
+                <input type="checkbox" name="rememberKey" data-remember-key />
+                记住到本机浏览器
+              </label>
+            </section>
+          </aside>
+        </form>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

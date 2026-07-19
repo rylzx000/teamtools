@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FPA 任务列表 - TeamTools</title>
+  <link rel="stylesheet" href="teamtools.css" />
+  <script src="teamtools.js" defer></script>
+</head>
+<body data-page="tasks" class="show-admin">
+  <div class="app-shell">
+    <main class="main-shell">
+      <header class="topbar">
+        <div class="topbar-module">
+          <span class="nav-dot"></span>
+          <strong>FPA 工作量评估</strong>
+        </div>
+        <div class="topbar-user">
+          <span>王明</span>
+          <span class="role-pill">管理员</span>
+          <button class="text-button" type="button">退出登录</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <nav class="module-tabs" aria-label="FPA 页面导航">
+          <a class="module-tab active" href="fpa-tasks.html">任务列表</a>
+          <a class="module-tab" href="fpa-submit.html">提交评估</a>
+          <a class="module-tab" href="fpa-detail.html">查看详情</a>
+        </nav>
+
+        <div class="page-title-row compact-title">
+          <h1>任务列表</h1>
+        </div>
+
+        <section class="panel toolbar-panel" aria-label="任务筛选">
+          <div class="filter-group" role="group" aria-label="状态筛选">
+            <button class="filter-chip active" type="button" data-status-filter="all">全部</button>
+            <button class="filter-chip" type="button" data-status-filter="running">进行中</button>
+            <button class="filter-chip" type="button" data-status-filter="done">已完成</button>
+            <button class="filter-chip" type="button" data-status-filter="failed">失败</button>
+            <button class="filter-chip" type="button" data-status-filter="cancelled">已取消</button>
+            <button class="filter-chip refresh-chip" type="button" data-refresh>手动刷新</button>
+          </div>
+          <div class="toolbar-meta">
+            <span>当前显示 <strong data-visible-count>4</strong> 条</span>
+            <span>最近刷新：<strong data-refresh-time>刚刚</strong></span>
+            <label class="switch-line">
+              <input type="checkbox" data-admin-toggle checked />
+              显示管理员字段
+            </label>
+          </div>
+        </section>
+
+        <section class="table-panel" aria-label="FPA 任务表格">
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>任务名称</th>
+                  <th>系统</th>
+                  <th>状态</th>
+                  <th>提交时间</th>
+                  <th>完成时间</th>
+                  <th>目标人天</th>
+                  <th>结果中值</th>
+                  <th>命中目标</th>
+                  <th class="admin-only">提交人</th>
+                  <th class="action-col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr data-status="running">
+                  <td><a class="task-link" href="fpa-detail.html">交易审批流程改造</a><span class="row-note">TASK-202606-014</span></td>
+                  <td>车险理赔核心系统</td>
+                  <td><span class="status running">等待AI调用</span></td>
+                  <td>06-27 09:12</td>
+                  <td>—</td>
+                  <td>18.0</td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td class="admin-only">刘洋</td>
+                  <td class="row-actions">
+                    <a class="mini-button" href="fpa-detail.html">查看</a>
+                  </td>
+                </tr>
+                <tr data-status="done">
+                  <td><a class="task-link" href="fpa-detail.html">客户资料补录校验</a><span class="row-note">TASK-202606-011</span></td>
+                  <td>在线理赔服务平台</td>
+                  <td><span class="status success">已完成</span></td>
+                  <td>06-26 16:40</td>
+                  <td>06-26 16:48</td>
+                  <td>10.0</td>
+                  <td>9.5</td>
+                  <td><span class="status success">命中</span></td>
+                  <td class="admin-only">陈静</td>
+                  <td class="row-actions">
+                    <a class="mini-button" href="fpa-detail.html">查看</a>
+                    <button class="mini-button" type="button">下载</button>
+                  </td>
+                </tr>
+                <tr data-status="failed">
+                  <td><a class="task-link" href="fpa-detail.html">结算单批量导入</a><span class="row-note">TASK-202606-009</span></td>
+                  <td>非车险理赔核心系统</td>
+                  <td><span class="status danger">失败</span></td>
+                  <td>06-26 11:05</td>
+                  <td>—</td>
+                  <td>6.5</td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td class="admin-only">赵磊</td>
+                  <td class="row-actions">
+                    <a class="mini-button" href="fpa-detail.html">查看</a>
+                  </td>
+                </tr>
+                <tr data-status="cancelled">
+                  <td><a class="task-link" href="fpa-detail.html">报表权限调整</a><span class="row-note">TASK-202606-006</span></td>
+                  <td>零配件报价系统</td>
+                  <td><span class="status muted">已取消</span></td>
+                  <td>06-25 18:20</td>
+                  <td>—</td>
+                  <td>4.0</td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td class="admin-only">王明</td>
+                  <td class="row-actions">
+                    <a class="mini-button" href="fpa-detail.html">查看</a>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
