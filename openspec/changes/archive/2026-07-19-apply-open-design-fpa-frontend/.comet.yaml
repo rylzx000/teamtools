@@ -18,7 +18,7 @@ verification_report: docs/superpowers/reports/2026-07-19-apply-open-design-fpa-f
 branch_status: handled
 created_at: 2026-07-19
 verified_at: 2026-07-19
-archived: false
+archived: true
 direct_override: null
 handoff_context: openspec/changes/apply-open-design-fpa-frontend/.comet/handoff/design-context.json
 handoff_hash: c45338a444b6b45888638c865f8f4ed8e60cf3ddb108495e9375174d67da189a

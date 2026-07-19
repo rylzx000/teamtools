@@ -2,6 +2,8 @@
 comet_change: apply-open-design-fpa-frontend
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-19-apply-open-design-fpa-frontend
+status: final
 ---
 
 # FPA 前端 Open Design 落地技术设计
@@ -133,3 +135,4 @@ async def fpa_form_config(request: Request) -> dict[str, Any]:
 - Open Design 原型和真实接口字段不完全一致：以 OpenSpec 和当前接口为准，不复制静态模拟数据。
 - Markdown 产物命名未最终稳定：前端兼容 `AI分析.md`/`AI评估.md` 空态，等待提示词脚本对话稳定后再统一。
 - 后端权限边界可能还有历史字段：本轮只收敛普通用户主内容和最小接口，不引入大范围权限重构。
+

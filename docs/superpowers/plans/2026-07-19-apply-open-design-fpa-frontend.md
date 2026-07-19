@@ -2,6 +2,7 @@
 change: apply-open-design-fpa-frontend
 design-doc: docs/superpowers/specs/2026-07-19-apply-open-design-fpa-frontend-design.md
 base-ref: f7d6b726a474fd251a92b29afdc41cfab12180a3
+archived-with: 2026-07-19-apply-open-design-fpa-frontend
 ---
 
 # FPA 前端 Open Design 落地实施计划
@@ -14,6 +15,7 @@ base-ref: f7d6b726a474fd251a92b29afdc41cfab12180a3
 
 **Tech Stack:** FastAPI、SQLite、Python unittest、React、TypeScript、Vite、CSS。
 
+archived-with: 2026-07-19-apply-open-design-fpa-frontend
 ---
 
 ### Task 1: 后端表单配置接口
@@ -459,3 +461,4 @@ git status --short
 ```
 
 Expected: diff 仅包含本 change 相关 OpenSpec/Superpowers 文档、前端运行态文件、最小后端接口和后端测试；不包含提交、推送、tag 或分支操作。
+
