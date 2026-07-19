@@ -1,0 +1,8 @@
+{
+  "openspec_proposal": "openspec/changes/apply-open-design-fpa-frontend/proposal.md",
+  "openspec_design": "openspec/changes/apply-open-design-fpa-frontend/design.md",
+  "openspec_tasks": "openspec/changes/apply-open-design-fpa-frontend/tasks.md",
+  "openspec_delta_spec": "openspec/changes/apply-open-design-fpa-frontend/specs/fpa-interface-ui/spec.md",
+  "handoff_context": "openspec/changes/apply-open-design-fpa-frontend/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/apply-open-design-fpa-frontend/.comet/handoff/design-context.md"
+}

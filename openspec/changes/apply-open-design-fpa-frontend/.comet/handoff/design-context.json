@@ -1,0 +1,15 @@
+{
+  "change": "apply-open-design-fpa-frontend",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "c45338a444b6b45888638c865f8f4ed8e60cf3ddb108495e9375174d67da189a",
+  "files": [
+    { "path": "openspec/changes/apply-open-design-fpa-frontend/proposal.md", "sha256": "46d72518d09d9c96d9f2b436ff8fa1049c97a819a224a4621fc0713c7bc5ae09" },
+    { "path": "openspec/changes/apply-open-design-fpa-frontend/design.md", "sha256": "14cf13e6f767986a492d5f1a6c549f7db8b4caebcffd91a29fa8826a4cfffdc0" },
+    { "path": "openspec/changes/apply-open-design-fpa-frontend/tasks.md", "sha256": "903219257d3e60300dc601b54997876c8737f63d32267e80e1302847c62cb152" },
+    { "path": "openspec/changes/apply-open-design-fpa-frontend/specs/fpa-interface-ui/spec.md", "sha256": "19a55ed2b13196a590256dcaf3b2c313ffbad9c3f1a7eaa5e3123422692c73d3" },
+    { "path": "openspec/changes/apply-open-design-fpa-frontend/specs/platform-architecture/spec.md", "sha256": "5101e08000c1fbfb7adb6804b46ad4d96e493f2a72e7e77257e42fbcc800435f" }
+  ]
+}

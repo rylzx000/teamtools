@@ -22,6 +22,7 @@ from .modules.fpa.service import (
     download_excel_path,
     ensure_resources,
     fetch_ai_request,
+    get_form_config,
     handle_ai_result,
     list_tasks,
     load_systems,
@@ -131,6 +132,11 @@ def create_app(
     async def fpa_systems(request: Request) -> dict[str, Any]:
         require_user(request)
         return {"items": load_systems(app_data_dir)}
+
+    @app.get("/api/fpa/form-config")
+    async def fpa_form_config(request: Request) -> dict[str, Any]:
+        require_user(request)
+        return get_form_config(app_data_dir)
 
     @app.post("/api/fpa/tasks")
     async def fpa_create_task(request: Request) -> dict[str, Any]:

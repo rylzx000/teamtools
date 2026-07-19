@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 
 type User = {
   id: string;
@@ -72,56 +72,33 @@ type ResultSummary = {
   coverage_notes?: string;
 };
 
-type AiRequest = {
-  provider: string;
-  model: string;
-  request_format: 'messages' | 'plain_prompt';
-  messages?: { role: string; content: string }[];
-  plain_prompt?: string;
-  generation_config?: Record<string, unknown>;
+type SelectOption = {
+  value: string;
+  label: string;
+  coefficient?: number;
 };
 
-type SystemRelevance = {
-  status: 'pass' | 'warning' | 'blocked';
-  confirmed?: boolean;
-  selected_system_code?: string;
-  selected_system_name?: string;
-  best_match_system_code?: string;
-  best_match_system_name?: string;
-  selected_score?: number;
-  best_match_score?: number;
-  message?: string;
+type FormConfig = {
+  systems: SystemItem[];
+  count_timings: SelectOption[];
+  integrity_levels: SelectOption[];
+  defaults: {
+    system_code?: string | null;
+    count_timing: string;
+    integrity_level: string;
+  };
 };
 
-type AiRequestResponse = {
-  ai_request: AiRequest;
-  system_relevance?: SystemRelevance;
-};
-
-const countTimingOptions = [
-  { value: '估算早期', label: '1.39 估算早期' },
-  { value: '估算中期', label: '1.21 估算中期' },
-  { value: '估算晚期', label: '1.10 估算晚期' },
-  { value: '项目交付后及运维阶段', label: '1.00 项目交付后及运维阶段' },
-];
-const integrityLevelOptions = [
-  { value: '没有明确的完整性级别或等级为C/D', label: '1.00 没有明确的完整性级别或等级为C/D' },
-  {
-    value: '完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式',
-    label: '1.10 完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式',
-  },
-  {
-    value: '完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施',
-    label: '1.30 完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施',
-  },
-];
 const DEEPSEEK_KEY_STORAGE = 'teamtools:fpa:deepseek-key';
+const DEEPSEEK_SESSION_KEY_STORAGE = 'teamtools:fpa:deepseek-session-key';
+const LAST_DETAIL_TASK_STORAGE = 'teamtools:fpa:last-detail-task-id';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [path, setPath] = useState(window.location.pathname);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
+  const [lastRefresh, setLastRefresh] = useState('刚刚');
 
   useEffect(() => {
     api('/api/auth/me')
@@ -134,10 +111,23 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
+  useEffect(() => {
+    const page = path.includes('/submit') ? 'submit' : path.includes('/tasks/') || path === '/fpa/detail' ? 'detail' : path.includes('/tasks') || path === '/' || path === '/modules' ? 'tasks' : 'login';
+    document.body.dataset.page = page;
+    document.body.classList.toggle('show-admin', user?.role === 'admin');
+  }, [path, user?.role]);
+
   function navigate(nextPath: string) {
     window.history.pushState({}, '', nextPath);
     setPath(nextPath);
   }
+
+  useEffect(() => {
+    if (!loading && user && (path === '/' || path === '/modules')) {
+      window.history.replaceState({}, '', '/fpa/tasks');
+      setPath('/fpa/tasks');
+    }
+  }, [loading, user, path]);
 
   async function logout() {
     await api('/api/auth/logout', { method: 'POST' });
@@ -154,8 +144,8 @@ export default function App() {
   }
 
   return (
-    <Shell user={user} path={path} navigate={navigate} logout={logout} notice={notice}>
-      <Router path={path} user={user} navigate={navigate} setNotice={setNotice} />
+    <Shell user={user} path={path} navigate={navigate} logout={logout} notice={notice} lastRefresh={lastRefresh}>
+      <Router path={path} user={user} navigate={navigate} setNotice={setNotice} setLastRefresh={setLastRefresh} />
     </Shell>
   );
 }
@@ -165,23 +155,28 @@ function Router({
   user,
   navigate,
   setNotice,
+  setLastRefresh,
 }: {
   path: string;
   user: User;
   navigate: (path: string) => void;
   setNotice: (value: string) => void;
+  setLastRefresh: (value: string) => void;
 }) {
   if (path === '/' || path === '/modules') {
-    return <HomePage navigate={navigate} />;
+    return <TasksPage user={user} navigate={navigate} setNotice={setNotice} setLastRefresh={setLastRefresh} />;
   }
   if (path === '/fpa/submit') {
     return <SubmitPage user={user} navigate={navigate} setNotice={setNotice} />;
   }
+  if (path === '/fpa/detail') {
+    return <LatestDetailPage navigate={navigate} setNotice={setNotice} />;
+  }
   if (path.startsWith('/fpa/tasks/')) {
-    return <DetailPage taskId={decodeURIComponent(path.split('/').pop() || '')} navigate={navigate} setNotice={setNotice} />;
+    return <DetailPage taskId={decodeURIComponent(path.split('/').pop() || '')} user={user} navigate={navigate} setNotice={setNotice} />;
   }
   if (path === '/fpa/tasks') {
-    return <TasksPage user={user} navigate={navigate} setNotice={setNotice} />;
+    return <TasksPage user={user} navigate={navigate} setNotice={setNotice} setLastRefresh={setLastRefresh} />;
   }
   return (
     <section className="panel empty-state">
@@ -240,6 +235,7 @@ function Shell({
   navigate,
   logout,
   notice,
+  lastRefresh,
   children,
 }: {
   user: User;
@@ -247,29 +243,20 @@ function Shell({
   navigate: (path: string) => void;
   logout: () => void;
   notice: string;
+  lastRefresh: string;
   children: React.ReactNode;
 }) {
+  const isDetailTab = path.includes('/fpa/tasks/') || path === '/fpa/detail';
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="TeamTools 模块导航">
-        <button className="brand-lockup" type="button" onClick={() => navigate('/')}>
-          <span className="brand-mark">TT</span>
-          <span><strong>TeamTools</strong><small>内部工具平台</small></span>
-        </button>
-        <nav className="module-nav" aria-label="模块入口">
-          <p className="nav-kicker">模块</p>
-          <button className="nav-link active" onClick={() => navigate('/fpa/tasks')} type="button"><span className="nav-dot" />FPA 工作量评估</button>
-          <span className="nav-link is-disabled"><span className="nav-dot muted" />后续模块预留</span>
-        </nav>
-      </aside>
-
       <main className="main-shell">
         <header className="topbar">
-          <div>
-            <p className="crumb">TeamTools / FPA 工作量评估</p>
-            <strong>{path.includes('/submit') ? '提交评估' : path.includes('/tasks/') ? '任务详情' : '任务列表'}</strong>
+          <div className="topbar-module">
+            <span className="nav-dot"></span>
+            <strong>FPA 工作量评估</strong>
           </div>
           <div className="topbar-user">
+            <span className="topbar-refresh">最近刷新：<strong>{lastRefresh}</strong></span>
             <span>{user.display_name}</span>
             <span className="role-pill">{user.role === 'admin' ? '管理员' : '普通用户'}</span>
             <button className="text-button" type="button" onClick={logout}>退出登录</button>
@@ -280,7 +267,7 @@ function Shell({
           <nav className="module-tabs" aria-label="FPA 页面导航">
             <button className={`module-tab ${path === '/fpa/tasks' ? 'active' : ''}`} onClick={() => navigate('/fpa/tasks')} type="button">任务列表</button>
             <button className={`module-tab ${path === '/fpa/submit' ? 'active' : ''}`} onClick={() => navigate('/fpa/submit')} type="button">提交评估</button>
-            {path.includes('/fpa/tasks/') && <span className="module-tab active">任务详情</span>}
+            <button className={`module-tab ${isDetailTab ? 'active' : ''}`} onClick={() => navigate('/fpa/detail')} type="button">查看详情</button>
           </nav>
           {notice && <div className="toast inline">{notice}</div>}
           {children}
@@ -290,41 +277,22 @@ function Shell({
   );
 }
 
-function HomePage({ navigate }: { navigate: (path: string) => void }) {
-  return (
-    <>
-      <div className="page-title-row">
-        <div>
-          <p className="eyebrow">PLATFORM HOME</p>
-          <h1>TeamTools</h1>
-          <p className="subtle">首版聚焦 FPA 工作量评估主链路：提交需求、浏览器调用 DeepSeek、回传结果、下载 Excel。</p>
-        </div>
-        <button className="button primary" onClick={() => navigate('/fpa/tasks')}>进入 FPA</button>
-      </div>
-      <article className="module-card">
-        <div>
-          <p className="eyebrow">FPA MODULE</p>
-          <h2>FPA 工作量评估</h2>
-          <p className="subtle">后端生成 AI 请求包，API Key 仅在浏览器本地使用，Excel 由后端确定性脚本生成。</p>
-        </div>
-        <button className="button" onClick={() => navigate('/fpa/submit')}>提交评估</button>
-      </article>
-    </>
-  );
-}
 
 function TasksPage({
   user,
   navigate,
   setNotice,
+  setLastRefresh,
 }: {
   user: User;
   navigate: (path: string) => void;
   setNotice: (value: string) => void;
+  setLastRefresh: (value: string) => void;
 }) {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [showAdminFields, setShowAdminFields] = useState(true);
 
   async function loadTasks() {
     setLoading(true);
@@ -332,7 +300,8 @@ function TasksPage({
     const data = await api(`/api/fpa/tasks${status ? `?status=${status}` : ''}`);
     setTasks(data.items);
     setLoading(false);
-    setNotice(`最近刷新：${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`);
+    const refreshTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    setLastRefresh(refreshTime);
   }
 
   useEffect(() => {
@@ -343,19 +312,12 @@ function TasksPage({
     if (filter !== 'running') return tasks;
     return tasks.filter((task) => ['waiting_ai_call', 'validating_result', 'generating_result'].includes(task.status));
   }, [tasks, filter]);
+  const showAdminColumn = user.role === 'admin' && showAdminFields;
 
   return (
     <>
-      <div className="page-title-row">
-        <div>
-          <p className="eyebrow">FPA MODULE</p>
-          <h1>FPA 任务</h1>
-          <p className="subtle">查看评估状态、调用模型、下载 Excel，普通用户只看到自己的任务。</p>
-        </div>
-        <div className="actions">
-          <button className="button primary" onClick={() => navigate('/fpa/submit')}>提交评估</button>
-          <button className="button" onClick={() => loadTasks()}>手动刷新</button>
-        </div>
+      <div className="page-title-row compact-title">
+        <h1>任务列表</h1>
       </div>
 
       <section className="panel toolbar-panel">
@@ -369,8 +331,17 @@ function TasksPage({
           ].map(([value, label]) => (
             <button key={value} className={`filter-chip ${filter === value ? 'active' : ''}`} onClick={() => setFilter(value)}>{label}</button>
           ))}
+          <button className="filter-chip refresh-chip" type="button" onClick={() => loadTasks()}>手动刷新</button>
         </div>
-        <div className="toolbar-meta">当前显示 <strong>{visibleTasks.length}</strong> 条</div>
+        <div className="toolbar-meta">
+          <span>当前显示 <strong>{visibleTasks.length}</strong> 条</span>
+          {user.role === 'admin' && (
+            <label className="switch-line">
+              <input type="checkbox" checked={showAdminFields} onChange={(event) => setShowAdminFields(event.target.checked)} />
+              显示管理员字段
+            </label>
+          )}
+        </div>
       </section>
 
       <section className="table-panel">
@@ -385,17 +356,17 @@ function TasksPage({
                 <th>完成时间</th>
                 <th>目标人天</th>
                 <th>结果中值</th>
-                <th>是否命中</th>
-                {user.role === 'admin' && <th>提交人</th>}
+                <th>命中目标</th>
+                {showAdminColumn && <th>提交人</th>}
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10}>加载中...</td></tr>
+                <tr><td colSpan={showAdminColumn ? 10 : 9}>加载中...</td></tr>
               ) : visibleTasks.length ? visibleTasks.map((task) => (
                 <tr key={task.id}>
-                  <td><button className="link-button" onClick={() => navigate(`/fpa/tasks/${task.id}`)}>{task.title}</button></td>
+                  <td><button className="task-link link-button" onClick={() => navigate(`/fpa/tasks/${task.id}`)}>{task.title}</button></td>
                   <td>{task.system_name}</td>
                   <td><span className={`status ${statusTone(task.status)}`}>{displayStatusLabel(task.status)}</span></td>
                   <td>{formatTime(task.created_at)}</td>
@@ -403,20 +374,63 @@ function TasksPage({
                   <td>{dash(task.target_person_days)}</td>
                   <td>{dash(task.result_median_person_days)}</td>
                   <td>{task.target_hit == null ? '未设置目标' : task.target_hit ? '命中' : '未命中'}</td>
-                  {user.role === 'admin' && <td>{task.created_by || '-'}</td>}
-                  <td>
-                    <button className="text-button" onClick={() => navigate(`/fpa/tasks/${task.id}`)}>查看</button>
-                    {task.can_download_excel && <a className="text-button" href={`/api/fpa/tasks/${task.id}/download/excel`}>下载</a>}
+                  {showAdminColumn && <td>{task.created_by || '-'}</td>}
+                  <td className="row-actions">
+                    <button className="mini-button" onClick={() => navigate(`/fpa/tasks/${task.id}`)}>查看</button>
+                    {task.can_download_excel && <a className="mini-button" href={`/api/fpa/tasks/${task.id}/download/excel`}>下载</a>}
                   </td>
                 </tr>
               )) : (
-                <tr><td colSpan={10}>暂无任务</td></tr>
+                <tr><td colSpan={showAdminColumn ? 10 : 9}>暂无任务</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </section>
     </>
+  );
+}
+
+function LatestDetailPage({ navigate, setNotice }: { navigate: (path: string) => void; setNotice: (value: string) => void }) {
+  const [empty, setEmpty] = useState(false);
+
+  useEffect(() => {
+    async function openDetail() {
+      const cachedTaskId = window.localStorage.getItem(LAST_DETAIL_TASK_STORAGE);
+      if (cachedTaskId) {
+        try {
+          await api(`/api/fpa/tasks/${cachedTaskId}`);
+          navigate(`/fpa/tasks/${cachedTaskId}`);
+          return;
+        } catch {
+          window.localStorage.removeItem(LAST_DETAIL_TASK_STORAGE);
+        }
+      }
+
+      try {
+        const data = await api('/api/fpa/tasks');
+        const latest = data.items?.[0];
+        if (latest?.id) {
+          navigate(`/fpa/tasks/${latest.id}`);
+        } else {
+          setEmpty(true);
+        }
+      } catch (err) {
+        setNotice(err instanceof Error ? err.message : '最新任务加载失败');
+        setEmpty(true);
+      }
+    }
+
+    openDetail();
+  }, [navigate, setNotice]);
+
+  if (!empty) return <section className="panel">正在打开最新任务...</section>;
+
+  return (
+    <section className="panel empty-state">
+      <h2>暂无任务</h2>
+      <button className="button primary" onClick={() => navigate('/fpa/submit')} type="button">提交评估</button>
+    </section>
   );
 }
 
@@ -430,19 +444,43 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
   const [inputText, setInputText] = useState('');
   const [fileText, setFileText] = useState('');
   const [fileName, setFileName] = useState('');
+  const [fileSize, setFileSize] = useState<number | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [countTimingOptions, setCountTimingOptions] = useState<SelectOption[]>([]);
+  const [integrityLevelOptions, setIntegrityLevelOptions] = useState<SelectOption[]>([]);
+  const [submitApiKey, setSubmitApiKey] = useState('');
+  const [rememberSubmitApiKey, setRememberSubmitApiKey] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api('/api/fpa/systems')
-      .then((data) => {
-        setSystems(data.items);
-        const preferred = data.items.some((item: SystemItem) => item.code === user.default_system_code)
+    const localKey = window.localStorage.getItem(DEEPSEEK_KEY_STORAGE) || '';
+    const sessionKey = window.sessionStorage.getItem(DEEPSEEK_SESSION_KEY_STORAGE) || '';
+    setSubmitApiKey(localKey || sessionKey);
+    setRememberSubmitApiKey(Boolean(localKey));
+    api('/api/fpa/form-config')
+      .then((data: FormConfig) => {
+        setSystems(data.systems);
+        setCountTimingOptions(data.count_timings);
+        setIntegrityLevelOptions(data.integrity_levels);
+        setCountTiming(data.defaults.count_timing);
+        setIntegrityLevel(data.defaults.integrity_level);
+        const preferred = data.systems.some((item) => item.code === user.default_system_code)
           ? user.default_system_code
-          : data.items[0]?.code || '';
+          : data.defaults.system_code || data.systems[0]?.code || '';
         setSystemCode(preferred || '');
       })
-      .catch((err) => setError(err instanceof Error ? err.message : '系统列表加载失败'));
+      .catch((err) => setError(err instanceof Error ? err.message : '表单配置加载失败'));
   }, [user.default_system_code]);
+
+  const targetDaysError = targetDays.trim() && !/^\d+(\.\d)?$/.test(targetDays.trim()) ? '目标人天最多保留 1 位小数' : '';
+
+  function changeSubmitRemember(nextRemember: boolean) {
+    setRememberSubmitApiKey(nextRemember);
+    if (!nextRemember) {
+      window.localStorage.removeItem(DEEPSEEK_KEY_STORAGE);
+    }
+  }
 
   async function readFile(file: File | undefined) {
     if (!file) return;
@@ -455,12 +493,31 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
       return;
     }
     setFileName(file.name);
+    setFileSize(file.size);
     setFileText(await file.text());
+    setError('');
+  }
+
+  function clearFile() {
+    setFileName('');
+    setFileSize(null);
+    setFileText('');
+    setFileInputKey((value) => value + 1);
+  }
+
+  function handleDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+    readFile(event.dataTransfer.files?.[0]).catch((err) => setError(err instanceof Error ? err.message : '文件读取失败'));
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError('');
+    if (targetDaysError) {
+      setError(targetDaysError);
+      return;
+    }
     const form = new URLSearchParams();
     form.set('system_code', systemCode);
     form.set('title', title);
@@ -469,8 +526,19 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
     form.set('uploaded_name', fileName);
     form.set('count_timing', countTiming);
     form.set('integrity_level', integrityLevel);
-    if (targetDays) form.set('target_person_days', targetDays);
+    if (targetDays.trim()) form.set('target_person_days', targetDays.trim());
     try {
+      const trimmedKey = submitApiKey.trim();
+      if (trimmedKey) {
+        window.sessionStorage.setItem(DEEPSEEK_SESSION_KEY_STORAGE, trimmedKey);
+      } else {
+        window.sessionStorage.removeItem(DEEPSEEK_SESSION_KEY_STORAGE);
+      }
+      if (rememberSubmitApiKey && trimmedKey) {
+        window.localStorage.setItem(DEEPSEEK_KEY_STORAGE, trimmedKey);
+      } else {
+        window.localStorage.removeItem(DEEPSEEK_KEY_STORAGE);
+      }
       const data = await api('/api/fpa/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -483,30 +551,23 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
     }
   }
 
-  const disabled = !systemCode || (!inputText.trim() && !fileText.trim());
+  const disabled = !systemCode || (!inputText.trim() && !fileText.trim()) || Boolean(targetDaysError);
 
   return (
     <>
-      <div className="page-title-row">
-        <div>
-          <h1>提交评估</h1>
-          <p className="subtle">提交后进入任务详情页，由浏览器使用本地 API Key 调用 DeepSeek。</p>
-        </div>
-        <button className="button" onClick={() => navigate('/fpa/tasks')}>返回任务列表</button>
+      <div className="page-title-row compact-title">
+        <h1>提交评估</h1>
       </div>
 
-      <form className="form-panel" onSubmit={submit}>
+      <form className="form-panel" onSubmit={submit} noValidate>
         <div className="form-main">
           <div className="field-grid">
             <label className="field">
               <span>系统选择</span>
               <select value={systemCode} onChange={(event) => setSystemCode(event.target.value)} required>
+                <option value="">请选择系统</option>
                 {systems.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
               </select>
-            </label>
-            <label className="field">
-              <span>目标人天</span>
-              <input value={targetDays} onChange={(event) => setTargetDays(event.target.value)} inputMode="decimal" placeholder="可选，例如 8.5" />
             </label>
             <label className="field">
               <span>规模计数时机</span>
@@ -520,33 +581,68 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
                 {integrityLevelOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
+            <label className="field field-target-days">
+              <span>目标人天</span>
+              <input value={targetDays} onChange={(event) => setTargetDays(event.target.value)} inputMode="decimal" placeholder="如 8.5" />
+            </label>
           </div>
+          {targetDaysError && <div className="field-error">{targetDaysError}</div>}
 
           <label className="field">
             <span>需求名称</span>
-            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="可选，为空时后端兜底" />
+            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="可选，为空时由后端自动生成" />
           </label>
 
           <label className="field">
             <span>粘贴 Markdown 内容</span>
-            <textarea value={inputText} onChange={(event) => setInputText(event.target.value)} rows={10} placeholder="粘贴需求正文..." />
+            <textarea className="markdown-input" value={inputText} onChange={(event) => setInputText(event.target.value)} maxLength={20000} placeholder="在这里粘贴需求 Markdown、流程说明、接口说明或评审记录。" />
+            <small><strong>{inputText.length}</strong> / 20000 字符</small>
           </label>
 
-          <label className="upload-zone">
-            <input type="file" accept=".md,text/markdown" onChange={(event) => readFile(event.target.files?.[0])} />
-            <strong>{fileName || '上传 Markdown 文件'}</strong>
-            <span>粘贴内容和上传文件会按顺序合并，单文件不超过 256KB。</span>
+          <label
+            className={`upload-box ${isDragging ? 'is-dragging' : ''} ${fileName ? 'is-selected' : ''}`}
+            onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+            onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
+            onDragLeave={(event) => { event.preventDefault(); setIsDragging(false); }}
+            onDrop={handleDrop}
+          >
+            <input key={fileInputKey} type="file" accept=".md,text/markdown,text/plain" onChange={(event) => readFile(event.target.files?.[0])} />
+            <span className="upload-icon" aria-hidden="true">MD</span>
+            <span>
+              <strong>{fileName ? '已选择 Markdown 文件' : '拖动 .md 文件到这里，或点击选择文件'}</strong>
+              <small>{fileName ? `${fileName} · ${formatFileSize(fileSize)}` : '文件不超过 256KB；可与粘贴内容同时提交。'}</small>
+            </span>
+            {fileName && <button className="mini-button" type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); clearFile(); }}>移除</button>}
           </label>
-
-          {error && <div className="form-alert is-error">{error}</div>}
-          <div className="actions end">
-            <button className="button primary" type="submit" disabled={disabled}>提交并生成 AI 请求包</button>
-          </div>
         </div>
-        <aside className="form-side panel">
-          <h2>模型调用边界</h2>
-          <p>API Key 只在任务详情页浏览器本地使用，不上传后端、不进入 AI 请求包、不写入任务文件。</p>
-          <p>AI 只输出结构化 JSON；最终人天、目标命中和 Excel 均由后端生成。</p>
+
+        <aside className="rule-panel">
+          <h2>提交规则</h2>
+          <ul className="rule-list">
+            <li>粘贴内容和上传文件至少提供一个。</li>
+            <li>文本不超过 2 万字符，文件不超过 256KB。</li>
+            <li>目标人天最多 1 位小数。</li>
+          </ul>
+          {error && <div className="form-alert is-error">{error}</div>}
+          <div className="form-actions">
+            <button className="button primary" type="submit" disabled={disabled}>提交</button>
+          </div>
+          <section className="model-panel model-panel-side" aria-label="模型调用设置">
+            <div className="panel-heading compact">
+              <h2>模型调用设置</h2>
+              <span className="status muted">本机使用</span>
+            </div>
+            <p className="model-brief">DeepSeek · deepseek-v4-flash</p>
+            <label className="field model-key">
+              <span>API Key</span>
+              <input type="password" value={submitApiKey} onChange={(event) => setSubmitApiKey(event.target.value)} autoComplete="off" placeholder="本地 DeepSeek API Key" />
+            </label>
+            <label className="check-line">
+              <input type="checkbox" checked={rememberSubmitApiKey} onChange={(event) => changeSubmitRemember(event.target.checked)} />
+              记住到本机浏览器
+            </label>
+            <p className="helper-text">未勾选时只保存到当前浏览器会话，跳转详情页后仍可继续本次调用，不上传后端。</p>
+          </section>
         </aside>
       </form>
     </>
@@ -555,10 +651,12 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
 
 function DetailPage({
   taskId,
+  user,
   navigate,
   setNotice,
 }: {
   taskId: string;
+  user: User;
   navigate: (path: string) => void;
   setNotice: (value: string) => void;
 }) {
@@ -571,106 +669,143 @@ function DetailPage({
   }
 
   useEffect(() => {
+    if (taskId) {
+      window.localStorage.setItem(LAST_DETAIL_TASK_STORAGE, taskId);
+    }
     loadDetail().catch((err) => setError(err instanceof Error ? err.message : '任务加载失败'));
   }, [taskId]);
-
-  async function cancel() {
-    await api(`/api/fpa/tasks/${taskId}/cancel`, { method: 'POST' });
-    setNotice('任务已取消');
-    await loadDetail();
-  }
-
-  async function rerun() {
-    const data = await api(`/api/fpa/tasks/${taskId}/rerun`, { method: 'POST' });
-    setNotice('已基于原输入创建新任务');
-    navigate(data.task.detail_url);
-  }
 
   if (error) return <section className="panel form-alert is-error">{error}</section>;
   if (!detail) return <section className="panel">加载中...</section>;
 
   const task = detail.task;
   const summary = detail.artifacts.result_summary.content;
-  const displayLabel = displayStatusLabel(task.status);
   const middleDays = summary?.work_days?.middle ?? task.result_median_person_days;
-  const functionPoints = summary?.function_point_total;
-  const adjustedFp = summary?.adjusted_fp_total;
   const targetStatus = summary?.target_check?.hit_status;
+  const markdown = detail.artifacts.ai_analysis_md.content || '';
+
+  async function copyTaskId() {
+    await navigator.clipboard.writeText(task.id);
+    setNotice('任务 ID 已复制');
+  }
 
   return (
     <>
-      <div className="page-title-row">
+      <div className="page-title-row detail-title-row">
         <div>
-          <p className="eyebrow">TASK DETAIL</p>
-          <h1>{task.title}</h1>
-          <p className="subtle">任务 ID：{task.id} · {task.system_name} · 提交时间 {formatTime(task.created_at)}</p>
+          <h1>最新任务详情</h1>
         </div>
-        <div className="actions">
-          {task.can_cancel && <button className="button" onClick={cancel}>取消任务</button>}
-          {task.can_rerun && <button className="button" onClick={rerun}>复制并重新生成</button>}
+        <div className="actions detail-task-actions">
+          <button className="button" onClick={copyTaskId}>复制任务 ID</button>
           <button className="button" onClick={() => navigate('/fpa/tasks')}>返回任务列表</button>
         </div>
       </div>
+      <p className="detail-task-meta subtle">{task.title} · 任务 ID：{task.id} · {task.system_name} · {formatTime(task.created_at)}</p>
 
-      <section className="summary-strip">
-        <div><span>当前状态</span><strong><span className={`status ${statusTone(task.status)}`}>{displayLabel}</span></strong></div>
+      <section className="detail-grid detail-primary-grid">
+        <StatusProgressCard status={task.status} />
+        <div className="detail-side-stack">
+          <TaskSummaryCard
+            task={task}
+            middleDays={middleDays}
+            targetStatus={targetStatus}
+            excel={detail.artifacts.excel_result}
+          />
+        </div>
+      </section>
+
+      {user.role === 'admin' && (
+        <ResultWorkbench
+          task={task}
+          summary={summary}
+          markdown={markdown}
+          excel={detail.artifacts.excel_result}
+        />
+      )}
+    </>
+  );
+}
+
+function TaskSummaryCard({
+  task,
+  middleDays,
+  targetStatus,
+  excel,
+}: {
+  task: TaskDetail['task'];
+  middleDays?: number | null;
+  targetStatus?: string;
+  excel: TaskDetail['artifacts']['excel_result'];
+}) {
+  return (
+    <article className="panel task-summary-card">
+      <div className="panel-heading">
+        <h2>任务摘要</h2>
+        {excel.available ? <a className="button small" href={excel.download_url}>下载 Excel</a> : <button className="button small" type="button" disabled>Excel 生成后可下载</button>}
+      </div>
+      <section className="summary-strip vertical">
         <div><span>目标人天</span><strong>{dash(task.target_person_days)}</strong></div>
         <div><span>结果中值</span><strong>{dash(middleDays)}</strong></div>
-        <div><span>目标校验</span><strong>{targetStatus ? targetHitLabel(targetStatus) : task.target_hit == null ? '-' : task.target_hit ? '命中' : '未命中'}</strong></div>
+        <div><span>是否命中目标</span><strong>{targetStatus ? targetHitLabel(targetStatus) : task.target_hit == null ? '-' : task.target_hit ? '命中' : '未命中'}</strong></div>
+        <div><span>耗时</span><strong>{formatDuration(task.created_at, task.finished_at)}</strong></div>
       </section>
+    </article>
+  );
+}
 
-      <section className="ai-call-hero">
-        {task.status === 'waiting_ai_call' ? (
-          <AiCallPanel taskId={task.id} onDone={loadDetail} setNotice={setNotice} />
-        ) : (
-          <article className="panel ai-panel">
-            <div className="panel-heading">
-              <h2>AI 调用区</h2>
-              <span className={`status ${statusTone(task.status)}`}>{displayLabel}</span>
+function StatusProgressCard({ status }: { status: string }) {
+  return (
+    <article className="panel status-workbench-card">
+      <div className="panel-heading">
+        <h2>状态进度</h2>
+        <span className={`status ${statusTone(status)}`}>{displayStatusLabel(status)}</span>
+      </div>
+      <ol className="progress-list">
+        {progressSteps().map((step, index) => (
+          <li key={step.title} className={progressClass(status, index)}>
+            <strong>{step.title}</strong>
+            <span>{step.description}</span>
+          </li>
+        ))}
+      </ol>
+    </article>
+  );
+}
+
+function ResultWorkbench({
+  task,
+  summary,
+  markdown,
+  excel,
+}: {
+  task: TaskDetail['task'];
+  summary?: ResultSummary | null;
+  markdown: string;
+  excel: TaskDetail['artifacts']['excel_result'];
+}) {
+  return (
+    <section className="detail-grid lower single result-workbench">
+      <article className="panel result-workbench-panel">
+        <div className="panel-heading">
+          <h2>结果查看</h2>
+          {excel.available && <a className="button primary" href={excel.download_url}>下载 Excel</a>}
+        </div>
+        <div className="artifact-list compact-artifacts">
+          <details className="artifact-item">
+            <summary>结果摘要 · 查看</summary>
+            <ResultSummaryReview summary={summary} status={task.status} errorSummary={task.error_summary} />
+          </details>
+          <details className="artifact-item">
+            <summary>AI分析.md 预览 · 复制</summary>
+            <div className="artifact-heading">
+              <span>管理员可查看和复制，不提供下载。</span>
+              <button className="mini-button" type="button" onClick={() => navigator.clipboard.writeText(markdown)} disabled={!markdown}>复制</button>
             </div>
-            <p className="subtle">{nextStepText(task.status)}</p>
-          </article>
-        )}
-      </section>
-
-      <section className="detail-grid">
-        <article className="panel">
-          <div className="panel-heading">
-            <h2>状态进度</h2>
-            <span className={`status ${statusTone(task.status)}`}>{displayLabel}</span>
-          </div>
-          <ol className="progress-list">
-            {progressLabels(task.status).map((label, index) => (
-              <li key={`${label}-${index}`} className={progressClass(task.status, index)}>
-                <strong>{label}</strong>
-                <span>{progressText(label)}</span>
-              </li>
-            ))}
-          </ol>
-        </article>
-
-        <ResultMetricsCard
-          functionPoints={functionPoints}
-          adjustedFp={adjustedFp}
-          middleDays={middleDays}
-          qualityGate={summary?.quality_gate}
-        />
-      </section>
-
-      <section className="result-grid">
-        <article className="panel">
-          <div className="panel-heading">
-            <h2>结果摘要</h2>
-            {detail.artifacts.excel_result.available && <a className="button primary" href={detail.artifacts.excel_result.download_url}>下载 Excel</a>}
-          </div>
-          <ResultSummaryReview summary={summary} status={task.status} errorSummary={task.error_summary} />
-        </article>
-        <article className="panel">
-          <div className="panel-heading"><h2>AI评估.md</h2></div>
-          <pre>{detail.artifacts.ai_analysis_md.content || (task.status === 'failed' ? task.error_summary : '') || 'AI评估说明待生成'}</pre>
-        </article>
-      </section>
-    </>
+            <pre>{markdown || (task.status === 'failed' ? task.error_summary : '') || 'AI评估说明待生成'}</pre>
+          </details>
+        </div>
+      </article>
+    </section>
   );
 }
 
@@ -769,154 +904,6 @@ function ReviewList({ title, items, empty }: { title: string; items: Array<{ tit
   );
 }
 
-function AiCallPanel({ taskId, onDone, setNotice }: { taskId: string; onDone: () => Promise<void>; setNotice: (value: string) => void }) {
-  const [apiKey, setApiKey] = useState('');
-  const [remember, setRemember] = useState(false);
-  const [aiRequest, setAiRequest] = useState<AiRequest | null>(null);
-  const [systemRelevance, setSystemRelevance] = useState<SystemRelevance | null>(null);
-  const [relevanceConfirmed, setRelevanceConfirmed] = useState(false);
-  const [calling, setCalling] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem(DEEPSEEK_KEY_STORAGE);
-    if (saved) {
-      setApiKey(saved);
-      setRemember(true);
-    }
-  }, []);
-
-  function changeRemember(nextRemember: boolean) {
-    setRemember(nextRemember);
-    if (!nextRemember) {
-      window.localStorage.removeItem(DEEPSEEK_KEY_STORAGE);
-    }
-  }
-
-  async function fetchRequest(): Promise<AiRequestResponse> {
-    const data = await api(`/api/fpa/tasks/${taskId}/ai-request`) as AiRequestResponse;
-    setAiRequest(data.ai_request);
-    setSystemRelevance(data.system_relevance || null);
-    if (data.system_relevance && ['warning', 'blocked'].includes(data.system_relevance.status) && !data.system_relevance.confirmed) {
-      setError(data.system_relevance.message || '系统选择可能与需求不匹配，请确认是否继续。');
-    } else {
-      setError('');
-      setNotice('AI 请求包已获取');
-    }
-    return data;
-  }
-
-  async function callDeepSeek() {
-    const trimmedApiKey = apiKey.trim();
-    if (!trimmedApiKey) {
-      setError('请先输入 DeepSeek API Key');
-      return;
-    }
-    const requestData = aiRequest ? { ai_request: aiRequest, system_relevance: systemRelevance || undefined } : await fetchRequest();
-    const relevance = requestData.system_relevance;
-    if (relevance && ['warning', 'blocked'].includes(relevance.status) && !relevance.confirmed && !relevanceConfirmed) {
-      setSystemRelevance(relevance);
-      setError(relevance.message || '系统选择可能与需求不匹配，请确认是否继续。');
-      return;
-    }
-    const request = requestData.ai_request;
-    setCalling(true);
-    setError('');
-    if (remember) {
-      window.localStorage.setItem(DEEPSEEK_KEY_STORAGE, trimmedApiKey);
-    } else {
-      window.localStorage.removeItem(DEEPSEEK_KEY_STORAGE);
-    }
-    try {
-      const body = {
-        model: request.model,
-        messages: request.request_format === 'messages'
-          ? request.messages
-          : [{ role: 'user', content: request.plain_prompt || '' }],
-        temperature: request.generation_config?.temperature ?? 0.2,
-      };
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${trimmedApiKey}`,
-        },
-        body: JSON.stringify(body),
-      });
-      const raw = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(raw?.error?.message || `DeepSeek HTTP ${response.status}`);
-      }
-      const result = await api(`/api/fpa/tasks/${taskId}/ai-result`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ success: true, provider: 'deepseek', model: request.model, raw_response: raw }),
-      });
-      const status = result?.task?.status;
-      if (status === 'completed') {
-        setNotice('AI 结果已回传，Excel 已生成');
-      } else if (status === 'failed') {
-        setNotice('AI 结果校验失败，请查看错误摘要或复制任务重跑');
-      } else {
-        setNotice(`AI 结果已回传，当前状态：${displayStatusLabel(status || '')}`);
-      }
-      await onDone();
-    } catch (err) {
-      const message = err instanceof TypeError ? 'Failed to fetch：可能是 CORS 或网络问题' : err instanceof Error ? err.message : '模型调用失败';
-      setError(message);
-    } finally {
-      setCalling(false);
-    }
-  }
-
-  async function confirmFailure() {
-    await api(`/api/fpa/tasks/${taskId}/ai-result`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ success: false, provider: 'deepseek', model: aiRequest?.model || 'deepseek-v4-flash', error: { code: 'browser_call_failed', message: error || '用户确认模型调用失败' } }),
-    });
-    setNotice('模型调用失败已回传后端');
-    await onDone();
-  }
-
-  async function confirmSystemRelevance() {
-    const data = await api(`/api/fpa/tasks/${taskId}/system-relevance/confirm`, { method: 'POST' });
-    setSystemRelevance(data.system_relevance || null);
-    setRelevanceConfirmed(true);
-    setError('');
-    setNotice('已确认按当前系统继续评估');
-  }
-
-  const needsSystemConfirm = Boolean(
-    systemRelevance && ['warning', 'blocked'].includes(systemRelevance.status) && !systemRelevance.confirmed && !relevanceConfirmed,
-  );
-
-  return (
-    <article className="panel ai-panel">
-      <div className="panel-heading">
-        <h2>AI 调用区</h2>
-        <span className="status running">等待AI调用</span>
-      </div>
-      <label className="field">
-        <span>DeepSeek API Key</span>
-        <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="仅浏览器本地使用，不上传后端" />
-      </label>
-      <label className="switch-line">
-        <input type="checkbox" checked={remember} onChange={(event) => changeRemember(event.target.checked)} />
-        仅保存到当前浏览器 localStorage
-      </label>
-      <div className="actions">
-        <button className="button" onClick={fetchRequest}>获取 AI 请求包</button>
-        {needsSystemConfirm && <button className="button" onClick={confirmSystemRelevance}>仍然继续</button>}
-        <button className="button primary" onClick={callDeepSeek} disabled={calling}>{calling ? '调用中...' : '浏览器调用 DeepSeek'}</button>
-        {error && !needsSystemConfirm && <button className="button danger" onClick={confirmFailure}>确认失败并回传</button>}
-      </div>
-      {aiRequest && <pre>{JSON.stringify({ provider: aiRequest.provider, model: aiRequest.model, request_format: aiRequest.request_format }, null, 2)}</pre>}
-      {error && <div className="form-alert is-error">{error}</div>}
-    </article>
-  );
-}
-
 async function api(path: string, init?: RequestInit) {
   const response = await fetch(path, { credentials: 'include', ...init });
   const contentType = response.headers.get('content-type') || '';
@@ -933,8 +920,24 @@ function formatTime(value?: string | null) {
   return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+function formatDuration(start?: string | null, end?: string | null) {
+  if (!start || !end) return '-';
+  const startTime = new Date(start).getTime();
+  const endTime = new Date(end).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return '-';
+  const minutes = Math.max(1, Math.round((endTime - startTime) / 60000));
+  if (minutes < 60) return `约 ${minutes} 分钟`;
+  const hours = Math.round(minutes / 60);
+  return `约 ${hours} 小时`;
+}
+
 function dash(value?: number | string | null) {
   return value === null || value === undefined || value === '' ? '-' : value;
+}
+
+function formatFileSize(value?: number | null) {
+  if (!value) return '0KB';
+  return `${(value / 1024).toFixed(1)}KB`;
 }
 
 function qualityGateLabel(value?: string) {
@@ -951,17 +954,15 @@ function targetHitLabel(value?: string) {
   return value;
 }
 
-function nextStepText(status: string) {
-  if (status === 'completed') return '任务已生成正式 Excel，可在结果摘要中查看质量提示并下载。';
-  if (status === 'failed') return '任务失败，请查看错误摘要或复制任务重新生成。';
-  if (status === 'canceled') return '任务已取消，可复制后重新提交。';
-  return '后端正在处理结果，请稍后刷新详情。';
+
+function isCancelledStatus(status: string) {
+  return status === 'canceled' || status === 'cancelled';
 }
 
 function statusTone(status: string) {
   if (status === 'completed') return 'done';
   if (status === 'failed') return 'failed';
-  if (status === 'canceled') return 'muted';
+  if (isCancelledStatus(status)) return 'muted';
   return 'running';
 }
 
@@ -973,35 +974,29 @@ function displayStatusLabel(status: string) {
   return 'AI评估中';
 }
 
-function progressLabels(status: string) {
-  const terminal = status === 'failed' ? '评估失败' : status === 'canceled' || status === 'cancelled' ? '已取消' : '评估完成';
-  return ['提交需求', 'AI评估中', '生成结果中', terminal];
+function progressSteps() {
+  return [
+    { title: '任务创建', description: '接收任务和输入内容' },
+    { title: 'AI请求包已生成', description: '后端已生成模型请求内容' },
+    { title: '等待AI调用', description: '浏览器使用本地 API Key 调用模型' },
+    { title: '结果校验中', description: '后端校验 AI 结构化 JSON' },
+    { title: '生成结果中', description: '后端写入 Excel 模板' },
+    { title: '已完成 / 失败 / 已取消', description: '输出最终状态' },
+  ];
 }
 
 function progressClass(status: string, index: number) {
   const activeMap: Record<string, number> = {
-    waiting_ai_call: 1,
-    validating_result: 2,
-    generating_result: 2,
-    completed: 3,
-    failed: 3,
-    canceled: 3,
-    cancelled: 3,
+    waiting_ai_call: 2,
+    validating_result: 3,
+    generating_result: 4,
+    completed: 5,
+    failed: 5,
+    canceled: 5,
+    cancelled: 5,
   };
-  const active = activeMap[status] ?? 1;
+  const active = activeMap[status] ?? 2;
   if (index < active) return 'done';
   if (index === active) return 'active';
   return '';
-}
-
-function progressText(label: string) {
-  const map: Record<string, string> = {
-    提交需求: '已接收需求和任务参数',
-    AI评估中: '浏览器调用模型并回传评估结果',
-    生成结果中: '后端生成摘要和 Excel',
-    评估完成: '结果已生成，可下载 Excel',
-    评估失败: '评估失败，可复制任务重新生成',
-    已取消: '任务已取消',
-  };
-  return map[label] || '';
 }

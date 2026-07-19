@@ -230,6 +230,34 @@ class FpaMvpTest(unittest.TestCase):
                 "完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施",
             )
 
+    def test_form_config_returns_safe_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+
+            response = client.get("/api/fpa/form-config")
+
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            self.assertIn("systems", payload)
+            self.assertIn("count_timings", payload)
+            self.assertIn("integrity_levels", payload)
+            self.assertIn("defaults", payload)
+            self.assertEqual(payload["defaults"]["count_timing"], "估算中期")
+            self.assertEqual(
+                payload["defaults"]["integrity_level"],
+                "完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式",
+            )
+            self.assertIn("1.21 估算中期", [item["label"] for item in payload["count_timings"]])
+            self.assertIn(
+                "1.10 完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式",
+                [item["label"] for item in payload["integrity_levels"]],
+            )
+            dumped = json.dumps(payload, ensure_ascii=False)
+            self.assertNotIn("knowledge_dir", dumped)
+            self.assertNotIn(str(tmp_path / "data"), dumped)
+
     def valid_structured_json(self) -> dict:
         sample = PROJECT_ROOT / "data" / "modules" / "fpa" / "examples" / "expected" / "AI结构化结果.sample.json"
         return json.loads(sample.read_text(encoding="utf-8"))

@@ -46,6 +46,11 @@ INTEGRITY_LEVELS = {
     DEFAULT_INTEGRITY_LEVEL,
     "完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施",
 }
+INTEGRITY_FACTORS = {
+    "没有明确的完整性级别或等级为C/D": 1.00,
+    DEFAULT_INTEGRITY_LEVEL: 1.10,
+    "完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施": 1.30,
+}
 COMMON_RELEVANCE_TOKENS = {
     "系统",
     "需求",
@@ -173,6 +178,31 @@ def load_systems(data_dir: Path) -> list[dict[str, Any]]:
         ],
         key=lambda item: item["sort_order"],
     )
+
+
+def select_option(value: str, coefficient: float) -> dict[str, Any]:
+    return {"value": value, "label": f"{coefficient:.2f} {value}", "coefficient": coefficient}
+
+
+def get_form_config(data_dir: Path) -> dict[str, Any]:
+    systems = load_systems(data_dir)
+    return {
+        "systems": systems,
+        "count_timings": [select_option(value, coefficient) for value, coefficient in COUNT_TIMINGS.items()],
+        "integrity_levels": [
+            select_option(value, INTEGRITY_FACTORS[value])
+            for value in (
+                "没有明确的完整性级别或等级为C/D",
+                DEFAULT_INTEGRITY_LEVEL,
+                "完整性级别为A同时为达成完整性级别要求在软件开发全生命周期均采取了特定、明确的措施",
+            )
+        ],
+        "defaults": {
+            "system_code": systems[0]["code"] if systems else None,
+            "count_timing": DEFAULT_COUNT_TIMING,
+            "integrity_level": DEFAULT_INTEGRITY_LEVEL,
+        },
+    }
 
 
 def system_by_code(data_dir: Path, code: str) -> dict[str, Any]:
