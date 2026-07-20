@@ -350,8 +350,8 @@ class FpaMvpTest(unittest.TestCase):
             self.assertTrue(body["artifacts"]["excel_result"]["available"])
             self.assertFalse(body["artifacts"]["fpa_process_json"]["available"])
             self.assertIsNone(body["artifacts"]["fpa_process_json"]["content"])
-            self.assertTrue(body["artifacts"]["ai_analysis_md"]["available"])
-            self.assertIn("FP-001", body["artifacts"]["ai_analysis_md"]["content"])
+            self.assertFalse(body["artifacts"]["ai_analysis_md"]["available"])
+            self.assertIsNone(body["artifacts"]["ai_analysis_md"]["content"])
             self.assertTrue(body["artifacts"]["result_summary"]["available"])
             self.assertEqual(body["artifacts"]["result_summary"]["content"]["item_count"], 4)
 
@@ -555,6 +555,7 @@ class FpaMvpTest(unittest.TestCase):
             }
             (task_root / "runtime" / "FPA生成过程.json").write_text(json.dumps(process, ensure_ascii=False), encoding="utf-8")
             (task_root / "ai" / "AI分析.md").write_text("已按 FPA 类别拆分。", encoding="utf-8")
+            (task_root / "output" / "FPA工作量评估.xlsx").write_bytes(b"PK-test-workbook")
             with open_connection(tmp_path / "teamtools-test.db") as conn:
                 conn.execute("UPDATE tasks SET status = 'completed', finished_at = updated_at WHERE id = ?", (task_id,))
                 conn.execute(
@@ -570,13 +571,28 @@ class FpaMvpTest(unittest.TestCase):
             detail = client.get(f"/api/fpa/tasks/{task_id}")
             self.assertEqual(detail.status_code, 200, detail.text)
             body = detail.json()
+            self.assertFalse(body["artifacts"]["ai_request_summary"]["available"])
             self.assertIsNone(body["artifacts"]["ai_request_summary"]["content"])
             self.assertFalse(body["artifacts"]["fpa_process_json"]["available"])
             self.assertIsNone(body["artifacts"]["fpa_process_json"]["content"])
             self.assertTrue(body["artifacts"]["result_summary"]["available"])
             self.assertIn("work_days", body["artifacts"]["result_summary"]["content"])
-            self.assertTrue(body["artifacts"]["ai_analysis_md"]["available"])
-            self.assertIn("已按 FPA 类别拆分", body["artifacts"]["ai_analysis_md"]["content"])
+            self.assertFalse(body["artifacts"]["ai_analysis_md"]["available"])
+            self.assertIsNone(body["artifacts"]["ai_analysis_md"]["content"])
+
+            downloaded = client.get(f"/api/fpa/tasks/{task_id}/download/excel")
+            self.assertEqual(downloaded.status_code, 200)
+            self.assertEqual(downloaded.content, b"PK-test-workbook")
+
+            client.post("/api/auth/logout")
+            self.login(client, "admin", "admin123")
+            admin_detail = client.get(f"/api/fpa/tasks/{task_id}")
+            self.assertEqual(admin_detail.status_code, 200, admin_detail.text)
+            admin_body = admin_detail.json()
+            self.assertTrue(admin_body["artifacts"]["ai_analysis_md"]["available"])
+            self.assertIn("已按 FPA 类别拆分", admin_body["artifacts"]["ai_analysis_md"]["content"])
+            self.assertTrue(admin_body["artifacts"]["fpa_process_json"]["available"])
+            self.assertIsNotNone(admin_body["artifacts"]["fpa_process_json"]["content"])
 
     def test_user_cannot_access_other_users_task(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

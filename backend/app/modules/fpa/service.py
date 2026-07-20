@@ -520,8 +520,8 @@ def task_detail(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any
                 "content": read_json(summary_path) if summary_path.exists() and is_admin else None,
             },
             "ai_analysis_md": {
-                "available": analysis_path is not None,
-                "content": analysis_path.read_text(encoding="utf-8") if analysis_path else None,
+                "available": analysis_path is not None and is_admin,
+                "content": analysis_path.read_text(encoding="utf-8") if analysis_path and is_admin else None,
             },
             "fpa_process_json": {
                 "available": process_path.exists() and is_admin,
@@ -727,7 +727,7 @@ def handle_ai_result(db_path: Path, data_dir: Path, task_id: str, user: dict[str
         (paths.ai_dir / "AI结构化结果.json").write_text(json.dumps(structured, ensure_ascii=False, indent=2), encoding="utf-8")
         if ai_assessment_md.strip():
             (paths.ai_dir / "AI评估.md").write_text(ai_assessment_md.strip() + "\n", encoding="utf-8")
-            register_file(db_path, data_dir, task_id, "ai_assessment_md", paths.ai_dir / "AI评估.md", viewable=True)
+            register_file(db_path, data_dir, task_id, "ai_assessment_md", paths.ai_dir / "AI评估.md", admin_only=True)
         elif structured.get("analysis_notes"):
             (paths.ai_dir / "AI分析.md").write_text(str(structured["analysis_notes"]), encoding="utf-8")
         register_file(db_path, data_dir, task_id, "ai_structured_json", paths.ai_dir / "AI结构化结果.json", admin_only=True)

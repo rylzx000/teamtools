@@ -16,26 +16,17 @@
 
 `FPA`、`API`、`GET`、`POST`、`Excel`、`AI` 保留英文，是模块、接口协议、HTTP 方法、文件类型和能力名称的既有约定。
 
-#### Scenario: 查询提交页配置
-- **WHEN** 前端调用 `GET /api/fpa/form-config`
-- **THEN** 后端返回启用系统、`规模计数时机` 选项、`完整性级别` 选项和默认值
-- **AND** 系统项不得包含 `knowledge_dir` 或服务器真实资料路径
-- **AND** 前端提交页必须使用该接口配置下拉选项，不得把系统和估算参数写死为运行态唯一来源
+#### Scenario: 任务详情隐藏普通用户 AI 分析 Markdown
+- **WHEN** 普通用户请求自己的已完成任务详情，且任务目录中存在 `AI分析.md` 或 `AI评估.md`
+- **THEN** 后端返回 `artifacts.ai_analysis_md.available = false`
+- **AND** `artifacts.ai_analysis_md.content = null`
+- **AND** 响应不得包含 AI 分析 Markdown 正文、后台排查 JSON、任务日志、原始模型响应、服务器路径、环境变量或模型 Key
 
-#### Scenario: 查询可选系统
-- **WHEN** 前端调用 `GET /api/fpa/systems`
-- **THEN** 后端只返回启用系统的编码、名称、类型和排序信息
-- **AND** 响应不得包含 `knowledge_dir` 或服务器真实资料路径
-
-#### Scenario: 创建任务
-- **WHEN** 前端提交 `POST /api/fpa/tasks`
-- **THEN** 后端校验输入、创建任务、生成 AI 请求包并返回任务详情地址
-- **AND** 前端跳转到任务详情页
-
-#### Scenario: 下载 Excel
-- **WHEN** 用户请求 `GET /api/fpa/tasks/{id}/download/excel`
-- **THEN** 后端校验任务权限和文件可下载状态
-- **AND** 不允许通过该接口下载 `AI分析.md`、`AI评估.md`、`FPA生成过程.json`、任务日志或其他过程文件
+#### Scenario: 管理员任务详情返回 AI 分析 Markdown
+- **WHEN** 管理员请求已完成任务详情，且任务目录中存在 `AI分析.md` 或 `AI评估.md`
+- **THEN** 后端返回 `artifacts.ai_analysis_md.available = true`
+- **AND** `artifacts.ai_analysis_md.content` 包含对应 Markdown 正文
+- **AND** 响应仍不得包含模型 Key、环境变量或服务器敏感路径
 
 ### Requirement: 平台壳与 FPA 页面结构
 
@@ -104,59 +95,15 @@
 
 系统 SHALL 以后端状态、权限字段和产物可见性驱动页面展示；列表页默认手动刷新，详情页可以按约定轮询。页面展示流程 SHALL 使用面向用户的简化阶段，不展示后台 JSON、payload、路由结构或过程文件。
 
-#### Scenario: 任务列表核心字段
-- **WHEN** 用户打开任务列表页
-- **THEN** 页面默认展示任务名称、系统、状态、提交时间、完成时间、目标人天、结果中值、命中目标和操作
-- **AND** 管理员可额外看到提交人，但该字段不得挤压核心字段
-- **AND** 常规 1366/1440 桌面宽度下任务列表不应出现横向滚动
-
-#### Scenario: 任务列表筛选
-- **WHEN** 用户筛选“全部”“进行中”“已完成”“失败”或“已取消”
-- **THEN** 页面按后端状态枚举展示对应任务
-- **AND** 列表页不自动轮询，只提供手动刷新
-
-#### Scenario: 列表操作收敛
-- **WHEN** 任务出现在列表页
-- **THEN** 操作列默认只展示 `查看`
-- **AND** 已完成且 `can_download_excel = true` 时额外展示 `下载`
-- **AND** 取消任务、复制并重新生成、重新调用模型等低频操作不得常驻列表操作列
-
-#### Scenario: 详情页状态主内容
-- **WHEN** 用户打开任务详情页
-- **THEN** 页面必须按 `waiting_ai_call`、`validating_result`、`generating_result`、`completed`、`failed`、`cancelled` 或 `canceled` 渲染主内容
-- **AND** 等待 AI 调用态展示任务摘要、API Key 缺失或已配置状态、调用模型入口和系统轻校验提示
-- **AND** 处理中状态展示状态进度和任务摘要，不堆叠后台技术细节
-- **AND** 完成态展示结果中值、目标命中、质量提示、Excel 下载和 `AI分析.md` 或 `AI评估.md` 预览/复制
-- **AND** 失败态展示失败阶段、脱敏原因、建议操作和可用的重新调用或复制并重新生成入口
-- **AND** 取消态展示取消状态和返回列表或复制重建入口
-
-#### Scenario: 详情页 AI 调用区
-- **WHEN** 任务处于 `waiting_ai_call`
-- **THEN** 页面展示 AI 请求包获取、API Key 本地填写和浏览器调用模型入口
-- **AND** API Key 不上传后端、不写入请求包、不明文展示已保存值
-
-#### Scenario: 系统轻校验提示
-- **WHEN** 详情页 AI 调用区获取 AI 请求包，且后端返回 `system_relevance.status` 为 `warning` 或 `blocked`
-- **THEN** 页面展示后端规则校验生成的系统可能选错提示
-- **AND** 页面提供“仍然继续”操作
-- **AND** 系统轻校验不得调用大模型、不消耗模型 token
-
-#### Scenario: 用户确认继续后不重复拦截
-- **WHEN** 用户已对当前任务的系统轻校验提示确认仍然继续
-- **THEN** 页面再次获取 AI 请求包或调用模型时不重复拦截
-- **AND** 页面仍以当前任务选择系统作为最终权威口径
-- **AND** 后端 AI 结果系统绑定校验仍必须执行
-
-#### Scenario: 页面简化阶段
-- **WHEN** 用户查看任务详情
-- **THEN** 页面以 `提交需求`、`AI评估中`、`生成结果中`、`评估完成`、`评估失败` 或 `已取消` 表达任务进度
-- **AND** 页面不得展示 `change_facts`、`routing_decisions`、`split_merge_decisions`、`frozen_items`、payload 或完整过程 JSON
-
 #### Scenario: 详情页结果展示
-- **WHEN** 任务已完成
-- **THEN** 页面展示摘要条、质量提示、`AI分析.md` 或 `AI评估.md` 预览和 Excel 下载入口
-- **AND** 结果字段来自后端和 `FPA生成过程.json` 的后台汇总，不得从 Excel 公式缓存读取
-- **AND** 普通用户不得下载或查看 `AI结构化结果.json`、完整 `FPA生成过程.json`、AI 请求包、脚本 payload、任务日志或其他排查文件
+- **WHEN** 任务已完成且普通用户打开自己的任务详情
+- **THEN** 页面展示摘要条、目标命中、质量提示和 Excel 下载入口
+- **AND** 普通用户不得查看、复制或下载 `AI分析.md`、`AI评估.md`、`AI结构化结果.json`、完整 `FPA生成过程.json`、AI 请求包、AI 请求摘要、脚本 payload、任务日志、原始模型响应或其他排查文件
+
+#### Scenario: 管理员查看 AI 分析 Markdown
+- **WHEN** 管理员打开已完成任务详情，且后端返回 `artifacts.ai_analysis_md.available = true`
+- **THEN** 页面可以展示并复制 `AI分析.md` 或 `AI评估.md`
+- **AND** 页面不得展示模型 Key、环境变量、服务器敏感路径或未脱敏堆栈
 
 ### Requirement: 按钮与权限展示
 
