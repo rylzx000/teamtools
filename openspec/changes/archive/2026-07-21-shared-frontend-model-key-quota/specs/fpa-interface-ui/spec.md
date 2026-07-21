@@ -1,32 +1,4 @@
-# fpa-interface-ui Specification
-
-## Purpose
-定义 FPA 模块 API、页面结构、状态展示、按钮权限和用户可见产物规则，确保前端交互与后端任务状态一致。
-
-## Source Documents
-
-- `docs/modules/fpa/05-接口设计.md`
-- `docs/ui/README.md`
-- `docs/ui/01-整体页面设计.md`
-- `docs/ui/modules/fpa-页面设计.md`
-## Requirements
-### Requirement: FPA API 资源边界
-
-系统 SHALL 通过 FPA 任务资源接口完成提交页配置查询、系统查询、任务创建、AI 请求包获取、AI 结果回传、任务列表、任务详情、取消、重新运行和 Excel 下载。
-
-`FPA`、`API`、`GET`、`POST`、`Excel`、`AI` 保留英文，是模块、接口协议、HTTP 方法、文件类型和能力名称的既有约定。
-
-#### Scenario: 任务详情隐藏普通用户 AI 分析 Markdown
-- **WHEN** 普通用户请求自己的已完成任务详情，且任务目录中存在 `AI分析.md` 或 `AI评估.md`
-- **THEN** 后端返回 `artifacts.ai_analysis_md.available = false`
-- **AND** `artifacts.ai_analysis_md.content = null`
-- **AND** 响应不得包含 AI 分析 Markdown 正文、后台排查 JSON、任务日志、原始模型响应、服务器路径、环境变量或模型 Key
-
-#### Scenario: 管理员任务详情返回 AI 分析 Markdown
-- **WHEN** 管理员请求已完成任务详情，且任务目录中存在 `AI分析.md` 或 `AI评估.md`
-- **THEN** 后端返回 `artifacts.ai_analysis_md.available = true`
-- **AND** `artifacts.ai_analysis_md.content` 包含对应 Markdown 正文
-- **AND** 响应仍不得包含模型 Key、环境变量或服务器敏感路径
+## MODIFIED Requirements
 
 ### Requirement: 平台壳与 FPA 页面结构
 
@@ -124,24 +96,7 @@
 - **THEN** 页面可以展示并复制 `AI分析.md` 或 `AI评估.md`
 - **AND** 页面不得展示模型 Key、环境变量、服务器敏感路径或未脱敏堆栈
 
-### Requirement: 按钮与权限展示
-
-系统 MUST 将按钮状态作为展示辅助，并由后端接口执行最终权限校验。低频操作 SHALL 放在详情页任务操作区或失败/排查区，不挤压列表核心操作。
-
-#### Scenario: 下载按钮
-- **WHEN** 任务已完成且后端返回 `can_download_excel = true`
-- **THEN** 页面在列表和详情摘要区展示下载 Excel 入口
-- **AND** 后端仍必须在下载接口校验当前用户权限
-
-#### Scenario: 取消按钮
-- **WHEN** 后端返回 `can_cancel = true`
-- **THEN** 页面在详情页任务操作区展示取消入口
-- **AND** 请求到达后端后仍必须校验任务状态和用户权限
-
-#### Scenario: 复制并重新生成按钮
-- **WHEN** 后端返回 `can_rerun = true`
-- **THEN** 页面在详情页任务操作区或失败建议区展示复制并重新生成入口
-- **AND** 任务列表页不得常驻展示该入口
+## ADDED Requirements
 
 ### Requirement: 管理员模型配置页
 
@@ -162,8 +117,3 @@
 - **WHEN** 普通用户访问模型配置页路径或接口
 - **THEN** 系统返回无权限
 - **AND** 页面不得展示公用 Key 配置、用户额度表或管理员操作按钮
-
-## Known Limits / 待确认点
-
-- 接口文档建议任务详情页每 2-3 秒轮询，现有页面实现是否完全采用该频率需以代码和实际测试为准。
-- FPA 页面设计引用 Open Design 原型，但 OpenSpec 只保留行为契约，不固化所有视觉细节。

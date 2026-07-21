@@ -24,10 +24,21 @@ from .modules.fpa.service import (
     fetch_ai_request,
     get_form_config,
     handle_ai_result,
+    issue_shared_model_key,
     list_tasks,
     load_systems,
     rerun_task,
     task_detail,
+)
+from .modules.model_keys.service import (
+    ModelKeyError,
+    bulk_reset_quotas,
+    bulk_set_quotas,
+    get_public_config as get_model_key_config,
+    list_admin_quotas,
+    reset_user_quota,
+    save_admin_config as save_model_key_config,
+    save_user_quota,
 )
 
 
@@ -66,6 +77,10 @@ def create_app(
 
     @app.exception_handler(FpaError)
     async def fpa_error_handler(_request: Request, exc: FpaError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc), "stage": exc.stage}, status_code=exc.status_code)
+
+    @app.exception_handler(ModelKeyError)
+    async def model_key_error_handler(_request: Request, exc: ModelKeyError) -> JSONResponse:
         return JSONResponse({"detail": str(exc), "stage": exc.stage}, status_code=exc.status_code)
 
     @app.get("/api/health")
@@ -128,6 +143,43 @@ def create_app(
     async def me(request: Request) -> dict[str, Any]:
         return {"user": public_user(require_user(request))}
 
+    @app.get("/api/admin/model-key/config")
+    async def admin_model_key_config(request: Request) -> dict[str, Any]:
+        require_admin(request)
+        return {"config": get_model_key_config(app_db_path)}
+
+    @app.post("/api/admin/model-key/config")
+    async def admin_save_model_key_config(request: Request) -> dict[str, Any]:
+        user = require_admin(request)
+        payload = await read_payload(request)
+        return {"config": save_model_key_config(app_db_path, user, payload)}
+
+    @app.get("/api/admin/model-key/quotas")
+    async def admin_model_key_quotas(request: Request) -> dict[str, Any]:
+        require_admin(request)
+        items = list_admin_quotas(app_db_path)
+        return {"items": items, "total": len(items)}
+
+    @app.post("/api/admin/model-key/quotas/bulk-set")
+    async def admin_model_key_quotas_bulk_set(request: Request) -> dict[str, Any]:
+        user = require_admin(request)
+        return bulk_set_quotas(app_db_path, user, await read_payload(request))
+
+    @app.post("/api/admin/model-key/quotas/bulk-reset")
+    async def admin_model_key_quotas_bulk_reset(request: Request) -> dict[str, Any]:
+        user = require_admin(request)
+        return bulk_reset_quotas(app_db_path, user)
+
+    @app.post("/api/admin/model-key/quotas/{user_id}")
+    async def admin_save_model_key_quota(request: Request, user_id: str) -> dict[str, Any]:
+        user = require_admin(request)
+        return {"quota": save_user_quota(app_db_path, user_id, user, await read_payload(request))}
+
+    @app.post("/api/admin/model-key/quotas/{user_id}/reset")
+    async def admin_reset_model_key_quota(request: Request, user_id: str) -> dict[str, Any]:
+        user = require_admin(request)
+        return {"quota": reset_user_quota(app_db_path, user_id, user)}
+
     @app.get("/api/fpa/systems")
     async def fpa_systems(request: Request) -> dict[str, Any]:
         require_user(request)
@@ -175,6 +227,10 @@ def create_app(
     @app.post("/api/fpa/tasks/{task_id}/system-relevance/confirm")
     async def fpa_confirm_system_relevance(request: Request, task_id: str) -> dict[str, Any]:
         return confirm_system_relevance(app_db_path, app_data_dir, task_id, require_user(request))
+
+    @app.post("/api/fpa/tasks/{task_id}/shared-model-key")
+    async def fpa_shared_model_key(request: Request, task_id: str) -> dict[str, Any]:
+        return issue_shared_model_key(app_db_path, task_id, require_user(request))
 
     @app.post("/api/fpa/tasks/{task_id}/ai-result")
     async def fpa_post_ai_result(request: Request, task_id: str) -> dict[str, Any]:
@@ -240,6 +296,13 @@ def require_user(request: Request) -> dict[str, Any]:
     if not row:
         raise FpaError("登录已失效", 401, "auth")
     return row
+
+
+def require_admin(request: Request) -> dict[str, Any]:
+    user = require_user(request)
+    if user["role"] != "admin":
+        raise FpaError("需要管理员权限", 403, "permission")
+    return user
 
 
 def public_user(user: dict[str, Any]) -> dict[str, Any]:

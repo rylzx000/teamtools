@@ -1,0 +1,9 @@
+{
+  "openspec_proposal": "openspec/changes/shared-frontend-model-key-quota/proposal.md",
+  "openspec_design": "openspec/changes/shared-frontend-model-key-quota/design.md",
+  "openspec_tasks": "openspec/changes/shared-frontend-model-key-quota/tasks.md",
+  "openspec_delta_spec": "openspec/changes/shared-frontend-model-key-quota/specs/fpa-interface-ui/spec.md",
+  "handoff_context": "openspec/changes/shared-frontend-model-key-quota/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/shared-frontend-model-key-quota/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-21-shared-frontend-model-key-quota"
+}

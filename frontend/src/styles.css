@@ -501,6 +501,14 @@ textarea { resize: vertical; }
 }
 .model-panel-side { margin-top: 12px; }
 .panel-heading.compact { margin-bottom: 10px; }
+.model-call-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
 .model-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -962,25 +970,29 @@ body[data-page="submit"] .check-line {
   font-size: 12px;
 }
 
-/* FPA 三个页签统一节奏：以提交评估页为基准，减少切换时的视觉跳动 */
+/* FPA 页签统一节奏：以提交评估页为基准，减少切换时的视觉跳动 */
 body[data-page="tasks"] .workspace,
-body[data-page="detail"] .workspace {
+body[data-page="detail"] .workspace,
+body[data-page="model-config"] .workspace {
   padding-top: 10px;
   padding-bottom: 12px;
 }
 body[data-page="tasks"] .module-tabs,
-body[data-page="detail"] .module-tabs {
+body[data-page="detail"] .module-tabs,
+body[data-page="model-config"] .module-tabs {
   margin-bottom: 8px;
 }
 body[data-page="tasks"] .page-title-row,
-body[data-page="detail"] .page-title-row {
+body[data-page="detail"] .page-title-row,
+body[data-page="model-config"] .page-title-row {
   margin-bottom: 8px;
   padding-bottom: 8px;
   min-height: 42px;
   align-items: center;
 }
 body[data-page="tasks"] .page-title-row h1,
-body[data-page="detail"] .page-title-row h1 {
+body[data-page="detail"] .page-title-row h1,
+body[data-page="model-config"] .page-title-row h1 {
   font-size: 22px;
   line-height: 1.2;
 }
@@ -1303,4 +1315,172 @@ body[data-page="tasks"] .data-table td.row-actions {
 
 body[data-page="detail"] .result-workbench {
   margin-top: 0;
+}
+
+.model-config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.model-config-card {
+  display: grid;
+  gap: 10px;
+}
+
+.shared-key-card {
+  padding: 10px 12px;
+}
+
+.shared-key-row {
+  display: grid;
+  grid-template-columns: 148px minmax(480px, 1fr) 88px auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.shared-key-title {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.shared-key-title h2 {
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.shared-key-field,
+.shared-quota-field,
+.shared-key-check {
+  margin-bottom: 0;
+}
+
+.shared-quota-field input {
+  text-align: right;
+}
+
+.shared-key-check {
+  align-self: end;
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+.shared-key-row .button {
+  align-self: end;
+  min-height: 32px;
+}
+
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bulk-actions input,
+.quota-input {
+  width: 82px;
+}
+
+.quota-table input[type="checkbox"] {
+  width: auto;
+}
+
+body[data-page="model-config"] .panel {
+  padding: 14px;
+}
+
+body[data-page="model-config"] .panel-heading {
+  margin-bottom: 6px;
+}
+
+body[data-page="model-config"] .panel-heading h2 {
+  font-size: 16px;
+}
+
+body[data-page="model-config"] .field {
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+body[data-page="model-config"] .shared-key-row .field {
+  margin-bottom: 0;
+}
+
+body[data-page="model-config"] .field span {
+  font-size: 12px;
+}
+
+body[data-page="model-config"] input,
+body[data-page="model-config"] select,
+body[data-page="model-config"] textarea {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+body[data-page="model-config"] .table-scroll {
+  overflow-x: hidden;
+  background: none;
+}
+
+body[data-page="model-config"] .data-table {
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+body[data-page="model-config"] .data-table th {
+  padding: 10px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+body[data-page="model-config"] .data-table td {
+  padding: 10px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+
+body[data-page="model-config"] .data-table td:first-child {
+  min-width: 0;
+  white-space: normal;
+}
+
+body[data-page="model-config"] .quota-table th:nth-child(1),
+body[data-page="model-config"] .quota-table td:nth-child(1) { width: 30%; }
+body[data-page="model-config"] .quota-table th:nth-child(2),
+body[data-page="model-config"] .quota-table td:nth-child(2) { width: 12%; }
+body[data-page="model-config"] .quota-table th:nth-child(3),
+body[data-page="model-config"] .quota-table td:nth-child(3) { width: 8%; }
+body[data-page="model-config"] .quota-table th:nth-child(4),
+body[data-page="model-config"] .quota-table td:nth-child(4) { width: 14%; }
+body[data-page="model-config"] .quota-table th:nth-child(5),
+body[data-page="model-config"] .quota-table td:nth-child(5),
+body[data-page="model-config"] .quota-table th:nth-child(6),
+body[data-page="model-config"] .quota-table td:nth-child(6) {
+  width: 10%;
+  text-align: right;
+}
+body[data-page="model-config"] .quota-table th:nth-child(7),
+body[data-page="model-config"] .quota-table td:nth-child(7) { width: 16%; }
+
+body[data-page="model-config"] .quota-table td.row-actions {
+  display: table-cell;
+  min-width: 0;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+body[data-page="model-config"] .row-actions .mini-button {
+  vertical-align: middle;
+}
+
+body[data-page="model-config"] .row-actions .mini-button + .mini-button {
+  margin-left: 8px;
 }

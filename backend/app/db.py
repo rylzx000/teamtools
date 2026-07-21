@@ -79,7 +79,58 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         target_hit INTEGER,
         quality_flags TEXT,
         validation_errors TEXT,
+        model_call_source TEXT,
+        model_call_ticket TEXT,
+        shared_quota_deducted_at TEXT,
         FOREIGN KEY(task_id) REFERENCES tasks(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS model_key_config (
+        id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        provider TEXT NOT NULL,
+        api_base TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        api_key TEXT,
+        default_quota INTEGER NOT NULL DEFAULT 10,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT,
+        FOREIGN KEY(updated_by) REFERENCES users(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_model_quotas (
+        user_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        quota_total INTEGER NOT NULL,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        last_used_at TEXT,
+        last_reset_at TEXT,
+        reset_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(reset_by) REFERENCES users(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS model_call_events (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('personal_key', 'shared_key')),
+        provider TEXT,
+        model_name TEXT,
+        ticket TEXT,
+        status TEXT NOT NULL CHECK(status IN ('issued', 'succeeded', 'failed')),
+        deducted INTEGER NOT NULL DEFAULT 0,
+        error_summary TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY(task_id) REFERENCES tasks(id),
+        FOREIGN KEY(user_id) REFERENCES users(id)
     )
     """,
     """
@@ -114,6 +165,8 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_tasks_module_status_created ON tasks(module, status, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_created_by_module_created ON tasks(created_by, module, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_task_files_task_role ON task_files(task_id, file_role)",
+    "CREATE INDEX IF NOT EXISTS idx_model_call_events_task ON model_call_events(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_model_call_events_ticket ON model_call_events(ticket)",
 )
 
 
@@ -199,6 +252,13 @@ def migrate_current_schema(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "default_system_code" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN default_system_code TEXT")
+    fpa_columns = {row["name"] for row in conn.execute("PRAGMA table_info(fpa_task_details)").fetchall()}
+    if "model_call_source" not in fpa_columns:
+        conn.execute("ALTER TABLE fpa_task_details ADD COLUMN model_call_source TEXT")
+    if "model_call_ticket" not in fpa_columns:
+        conn.execute("ALTER TABLE fpa_task_details ADD COLUMN model_call_ticket TEXT")
+    if "shared_quota_deducted_at" not in fpa_columns:
+        conn.execute("ALTER TABLE fpa_task_details ADD COLUMN shared_quota_deducted_at TEXT")
 
 
 def seed_dev_users(conn: sqlite3.Connection) -> None:

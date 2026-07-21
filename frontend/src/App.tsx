@@ -41,12 +41,48 @@ type TaskDetail = {
     can_fetch_ai_request: boolean;
     can_submit_ai_result: boolean;
   };
+  model_quota?: ModelQuota;
   artifacts: {
     ai_analysis_md: { available: boolean; content?: string | null };
     fpa_process_json: { available: boolean; content?: unknown };
     result_summary: { available: boolean; content?: ResultSummary | null };
     excel_result: { available: boolean; download_url: string };
   };
+};
+
+type ModelQuota = {
+  enabled: boolean;
+  quota_total: number;
+  used_count: number;
+  remaining: number;
+};
+
+type ModelKeyConfig = {
+  enabled: boolean;
+  provider: string;
+  api_base: string;
+  model_name: string;
+  default_quota: number;
+  has_api_key: boolean;
+  masked_key: string;
+};
+
+type ModelQuotaRow = ModelQuota & {
+  user_id: string;
+  username: string;
+  display_name: string;
+  role: 'user' | 'admin';
+  last_used_at?: string | null;
+  last_reset_at?: string | null;
+};
+
+type SharedModelKeyResponse = {
+  provider: string;
+  api_base: string;
+  model: string;
+  api_key: string;
+  ticket: string;
+  quota: ModelQuota;
 };
 
 type ResultSummary = {
@@ -92,6 +128,9 @@ type FormConfig = {
 const DEEPSEEK_KEY_STORAGE = 'teamtools:fpa:deepseek-key';
 const DEEPSEEK_SESSION_KEY_STORAGE = 'teamtools:fpa:deepseek-session-key';
 const LAST_DETAIL_TASK_STORAGE = 'teamtools:fpa:last-detail-task-id';
+const DEFAULT_MODEL_PROVIDER = 'deepseek';
+const DEFAULT_MODEL_API_BASE = 'https://api.deepseek.com';
+const DEFAULT_MODEL_NAME = 'deepseek-v4-flash';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -112,7 +151,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const page = path.includes('/submit') ? 'submit' : path.includes('/tasks/') || path === '/fpa/detail' ? 'detail' : path.includes('/tasks') || path === '/' || path === '/modules' ? 'tasks' : 'login';
+    const page = path.includes('/model-config') ? 'model-config' : path.includes('/submit') ? 'submit' : path.includes('/tasks/') || path === '/fpa/detail' ? 'detail' : path.includes('/tasks') || path === '/' || path === '/modules' ? 'tasks' : 'login';
     document.body.dataset.page = page;
     document.body.classList.toggle('show-admin', user?.role === 'admin');
   }, [path, user?.role]);
@@ -171,6 +210,11 @@ function Router({
   }
   if (path === '/fpa/detail') {
     return <LatestDetailPage navigate={navigate} setNotice={setNotice} />;
+  }
+  if (path === '/fpa/model-config') {
+    return user.role === 'admin'
+      ? <ModelConfigPage setNotice={setNotice} />
+      : <section className="panel empty-state"><h2>需要管理员权限</h2><button className="button primary" onClick={() => navigate('/fpa/tasks')}>返回任务列表</button></section>;
   }
   if (path.startsWith('/fpa/tasks/')) {
     return <DetailPage taskId={decodeURIComponent(path.split('/').pop() || '')} user={user} navigate={navigate} setNotice={setNotice} />;
@@ -268,6 +312,7 @@ function Shell({
             <button className={`module-tab ${path === '/fpa/tasks' ? 'active' : ''}`} onClick={() => navigate('/fpa/tasks')} type="button">任务列表</button>
             <button className={`module-tab ${path === '/fpa/submit' ? 'active' : ''}`} onClick={() => navigate('/fpa/submit')} type="button">提交评估</button>
             <button className={`module-tab ${isDetailTab ? 'active' : ''}`} onClick={() => navigate('/fpa/detail')} type="button">查看详情</button>
+            {user.role === 'admin' && <button className={`module-tab ${path === '/fpa/model-config' ? 'active' : ''}`} onClick={() => navigate('/fpa/model-config')} type="button">模型配置</button>}
           </nav>
           {notice && <div className="toast inline">{notice}</div>}
           {children}
@@ -632,7 +677,7 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
               <h2>模型调用设置</h2>
               <span className="status muted">本机使用</span>
             </div>
-            <p className="model-brief">DeepSeek · deepseek-v4-flash</p>
+            <p className="model-brief">个人 Key 优先；留空时使用团队公用 Key</p>
             <label className="field model-key">
               <span>API Key</span>
               <input type="password" value={submitApiKey} onChange={(event) => setSubmitApiKey(event.target.value)} autoComplete="off" placeholder="本地 DeepSeek API Key" />
@@ -641,10 +686,177 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
               <input type="checkbox" checked={rememberSubmitApiKey} onChange={(event) => changeSubmitRemember(event.target.checked)} />
               记住到本机浏览器
             </label>
-            <p className="helper-text">未勾选时只保存到当前浏览器会话，跳转详情页后仍可继续本次调用，不上传后端。</p>
+            <p className="helper-text">个人 API Key 只保存在本机浏览器，不上传后端；留空时详情页会领取团队公用 Key。</p>
           </section>
         </aside>
       </form>
+    </>
+  );
+}
+
+function ModelConfigPage({ setNotice }: { setNotice: (value: string) => void }) {
+  const [config, setConfig] = useState<ModelKeyConfig | null>(null);
+  const [quotas, setQuotas] = useState<ModelQuotaRow[]>([]);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [bulkQuota, setBulkQuota] = useState('10');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  async function loadAll() {
+    setLoading(true);
+    const [configData, quotaData] = await Promise.all([
+      api('/api/admin/model-key/config'),
+      api('/api/admin/model-key/quotas'),
+    ]);
+    setConfig(configData.config);
+    setQuotas(quotaData.items);
+    setBulkQuota(String(configData.config.default_quota ?? 10));
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadAll().catch((err) => {
+      setError(err instanceof Error ? err.message : '模型配置加载失败');
+      setLoading(false);
+    });
+  }, []);
+
+  function updateConfig<K extends keyof ModelKeyConfig>(key: K, value: ModelKeyConfig[K]) {
+    if (!config) return;
+    setConfig({ ...config, [key]: value });
+  }
+
+  function updateQuota(userId: string, patch: Partial<ModelQuotaRow>) {
+    setQuotas((items) => items.map((item) => item.user_id === userId ? { ...item, ...patch } : item));
+  }
+
+  async function saveConfig(event: FormEvent) {
+    event.preventDefault();
+    if (!config) return;
+    setError('');
+    const saved = await api('/api/admin/model-key/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: config.enabled,
+        provider: config.provider,
+        api_base: config.api_base,
+        model_name: config.model_name,
+        api_key: apiKeyInput,
+        default_quota: Number(config.default_quota),
+      }),
+    });
+    setConfig(saved.config);
+    setApiKeyInput('');
+    setNotice('模型配置已保存');
+  }
+
+  async function saveQuota(row: ModelQuotaRow) {
+    const saved = await api(`/api/admin/model-key/quotas/${row.user_id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: row.enabled, quota_total: Number(row.quota_total) }),
+    });
+    updateQuota(row.user_id, saved.quota);
+    setNotice('用户额度已保存');
+  }
+
+  async function resetQuota(row: ModelQuotaRow) {
+    const saved = await api(`/api/admin/model-key/quotas/${row.user_id}/reset`, { method: 'POST' });
+    updateQuota(row.user_id, saved.quota);
+    setNotice('用户用量已重置');
+  }
+
+  async function bulkSet() {
+    await api('/api/admin/model-key/quotas/bulk-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quota_total: Number(bulkQuota) }),
+    });
+    await loadAll();
+    setNotice('已统一设置额度');
+  }
+
+  async function bulkReset() {
+    await api('/api/admin/model-key/quotas/bulk-reset', { method: 'POST' });
+    await loadAll();
+    setNotice('已统一重置用量');
+  }
+
+  if (loading) return <section className="panel">加载中...</section>;
+  if (error) return <section className="panel form-alert is-error">{error}</section>;
+  if (!config) return <section className="panel empty-state"><h2>模型配置不可用</h2></section>;
+
+  return (
+    <>
+      <div className="page-title-row compact-title">
+        <h1>模型配置</h1>
+      </div>
+      <section className="model-config-grid">
+        <form className="panel model-config-card shared-key-card" onSubmit={saveConfig}>
+          <div className="shared-key-row">
+            <div className="shared-key-title">
+              <h2>公用 Key 配置</h2>
+              <span className={`status ${config.enabled ? 'done' : 'muted'}`}>{config.enabled ? '已启用' : '未启用'}</span>
+            </div>
+            <label className="field shared-key-field">
+              <span>公用 API Key</span>
+              <input type="password" value={apiKeyInput} onChange={(event) => setApiKeyInput(event.target.value)} autoComplete="off" placeholder={config.has_api_key ? `已配置：${config.masked_key}；留空不替换` : '请输入公用 API Key'} />
+            </label>
+            <label className="field shared-quota-field">
+              <span>默认额度</span>
+              <input type="number" min="0" value={config.default_quota} onChange={(event) => updateConfig('default_quota', Number(event.target.value))} />
+            </label>
+            <label className="check-line shared-key-check">
+              <input type="checkbox" checked={config.enabled} onChange={(event) => updateConfig('enabled', event.target.checked)} />
+              启用公用 Key
+            </label>
+            <button className="button primary" type="submit">保存配置</button>
+          </div>
+        </form>
+
+        <section className="panel model-config-card">
+          <div className="panel-heading">
+            <h2>用户额度管理</h2>
+            <div className="bulk-actions">
+              <input value={bulkQuota} onChange={(event) => setBulkQuota(event.target.value)} inputMode="numeric" aria-label="统一额度" />
+              <button className="mini-button" type="button" onClick={bulkSet}>统一设置</button>
+              <button className="mini-button" type="button" onClick={bulkReset}>统一重置</button>
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table className="data-table quota-table">
+              <thead>
+                <tr>
+                  <th>用户</th>
+                  <th>角色</th>
+                  <th>启用</th>
+                  <th>总额度</th>
+                  <th>已用</th>
+                  <th>剩余</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quotas.map((row) => (
+                  <tr key={row.user_id}>
+                    <td>{row.display_name}<span className="subtle">（{row.username}）</span></td>
+                    <td>{row.role === 'admin' ? '管理员' : '普通用户'}</td>
+                    <td><input type="checkbox" checked={row.enabled} onChange={(event) => updateQuota(row.user_id, { enabled: event.target.checked })} /></td>
+                    <td><input className="quota-input" type="number" min="0" value={row.quota_total} onChange={(event) => updateQuota(row.user_id, { quota_total: Number(event.target.value) })} /></td>
+                    <td>{row.used_count}</td>
+                    <td>{row.remaining}</td>
+                    <td className="row-actions">
+                      <button className="mini-button" type="button" onClick={() => saveQuota(row)}>保存</button>
+                      <button className="mini-button" type="button" onClick={() => resetQuota(row)}>重置</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
     </>
   );
 }
@@ -662,6 +874,8 @@ function DetailPage({
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [error, setError] = useState('');
+  const [calling, setCalling] = useState(false);
+  const [callError, setCallError] = useState('');
 
   async function loadDetail() {
     const data = await api(`/api/fpa/tasks/${taskId}`);
@@ -689,6 +903,76 @@ function DetailPage({
     setNotice('任务 ID 已复制');
   }
 
+  async function callModel() {
+    setCalling(true);
+    setCallError('');
+    let source: 'personal_key' | 'shared_key' = 'personal_key';
+    let ticket = '';
+    let apiKey = (window.localStorage.getItem(DEEPSEEK_KEY_STORAGE) || window.sessionStorage.getItem(DEEPSEEK_SESSION_KEY_STORAGE) || '').trim();
+    let apiBase = DEFAULT_MODEL_API_BASE;
+    let model = DEFAULT_MODEL_NAME;
+    try {
+      if (!apiKey) {
+        const shared: SharedModelKeyResponse = await api(`/api/fpa/tasks/${task.id}/shared-model-key`, { method: 'POST' });
+        source = 'shared_key';
+        ticket = shared.ticket;
+        apiKey = shared.api_key;
+        apiBase = shared.api_base || apiBase;
+        model = shared.model || model;
+      }
+      const request = await api(`/api/fpa/tasks/${task.id}/ai-request`);
+      const aiRequest = request.ai_request || {};
+      const modelResponse = await fetch(`${apiBase.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: aiRequest.messages || [{ role: 'user', content: aiRequest.plain_prompt || '' }],
+          temperature: aiRequest.temperature ?? 0.2,
+        }),
+      });
+      const rawResponse = await modelResponse.json().catch(() => ({}));
+      if (!modelResponse.ok) {
+        const message = rawResponse?.error?.message || rawResponse?.message || `模型调用失败：HTTP ${modelResponse.status}`;
+        await api(`/api/fpa/tasks/${task.id}/ai-result`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            success: false,
+            model_call_source: source,
+            model_call_ticket: ticket,
+            error: { code: 'model_call_failed', message },
+          }),
+        });
+        throw new Error(message);
+      }
+      await api(`/api/fpa/tasks/${task.id}/ai-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: true,
+          provider: DEFAULT_MODEL_PROVIDER,
+          model,
+          model_call_source: source,
+          model_call_ticket: ticket,
+          raw_response: rawResponse,
+        }),
+      });
+      setNotice(source === 'shared_key' ? '已使用团队公用 Key 完成 AI 评估' : '已使用个人 Key 完成 AI 评估');
+      await loadDetail();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'AI 评估失败';
+      setCallError(message);
+      setNotice(message);
+      await loadDetail().catch(() => undefined);
+    } finally {
+      setCalling(false);
+    }
+  }
+
   return (
     <>
       <div className="page-title-row detail-title-row">
@@ -710,6 +994,10 @@ function DetailPage({
             middleDays={middleDays}
             targetStatus={targetStatus}
             excel={detail.artifacts.excel_result}
+            modelQuota={detail.model_quota}
+            calling={calling}
+            callError={callError}
+            onCallModel={callModel}
           />
         </div>
       </section>
@@ -731,11 +1019,19 @@ function TaskSummaryCard({
   middleDays,
   targetStatus,
   excel,
+  modelQuota,
+  calling,
+  callError,
+  onCallModel,
 }: {
   task: TaskDetail['task'];
   middleDays?: number | null;
   targetStatus?: string;
   excel: TaskDetail['artifacts']['excel_result'];
+  modelQuota?: ModelQuota;
+  calling: boolean;
+  callError: string;
+  onCallModel: () => void;
 }) {
   return (
     <article className="panel task-summary-card">
@@ -748,7 +1044,17 @@ function TaskSummaryCard({
         <div><span>结果中值</span><strong>{dash(middleDays)}</strong></div>
         <div><span>是否命中目标</span><strong>{targetStatus ? targetHitLabel(targetStatus) : task.target_hit == null ? '-' : task.target_hit ? '命中' : '未命中'}</strong></div>
         <div><span>耗时</span><strong>{formatDuration(task.created_at, task.finished_at)}</strong></div>
+        <div><span>公用 Key 余量</span><strong>{modelQuota ? `剩余 ${modelQuota.remaining} / 共 ${modelQuota.quota_total} 次` : '-'}</strong></div>
       </section>
+      {task.can_submit_ai_result && (
+        <div className="model-call-inline">
+          <button className="button primary small" type="button" onClick={onCallModel} disabled={calling}>
+            {calling ? 'AI 评估中...' : '开始 AI 评估'}
+          </button>
+          <span className="helper-text">优先使用本机个人 Key；未配置时使用团队公用 Key。</span>
+        </div>
+      )}
+      {callError && <div className="form-alert is-error">{callError}</div>}
     </article>
   );
 }

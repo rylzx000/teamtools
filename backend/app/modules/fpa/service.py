@@ -12,6 +12,16 @@ from typing import Any
 import yaml
 
 from ...db import fetch_all, fetch_one, open_connection, utc_now, write_task_event
+from ..model_keys.service import (
+    SOURCE_PERSONAL,
+    SOURCE_SHARED,
+    deduct_shared_quota_once,
+    issue_shared_key,
+    normalize_source,
+    quota_summary_for_user,
+    record_call_failure,
+    record_personal_call,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
@@ -266,7 +276,8 @@ def get_task_for_user(conn: sqlite3.Connection, task_id: str, user: dict[str, An
         f"""
         SELECT t.*, d.system_code, d.system_name, d.count_timing, d.no_knowledge_mode,
                d.target_person_days, d.ai_item_count, d.result_item_count,
-               d.result_median_person_days, d.target_hit, d.quality_flags
+               d.result_median_person_days, d.target_hit, d.quality_flags,
+               d.model_call_source, d.model_call_ticket, d.shared_quota_deducted_at
         FROM tasks t
         JOIN fpa_task_details d ON d.task_id = t.id
         WHERE {where}
@@ -471,6 +482,12 @@ def fetch_ai_request(db_path: Path, data_dir: Path, task_id: str, user: dict[str
     }
 
 
+def issue_shared_model_key(db_path: Path, task_id: str, user: dict[str, Any]) -> dict[str, Any]:
+    with open_connection(db_path) as conn:
+        task = get_task_for_user(conn, task_id, user)
+    return issue_shared_key(db_path, task)
+
+
 def list_tasks(db_path: Path, user: dict[str, Any], status: str | None = None) -> dict[str, Any]:
     params: list[Any] = []
     where = "t.module = 'fpa'"
@@ -514,6 +531,7 @@ def task_detail(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any
     result_summary = summarize_process(process) if isinstance(process, dict) else None
     return {
         "task": task_public,
+        "model_quota": quota_summary_for_user(db_path, task["created_by"]),
         "artifacts": {
             "ai_request_summary": {
                 "available": summary_path.exists() and is_admin,
@@ -696,10 +714,24 @@ def handle_ai_result(db_path: Path, data_dir: Path, task_id: str, user: dict[str
         task = get_task_for_user(conn, task_id, user)
         if task["status"] != "waiting_ai_call":
             raise FpaError("当前状态不能回传 AI 结果", 409, "ai_result")
+        model_call_source = normalize_source(payload.get("model_call_source"))
+        model_call_ticket = str(payload.get("model_call_ticket") or "").strip() or None
+        if model_call_source == SOURCE_SHARED and (not model_call_ticket or model_call_ticket != task.get("model_call_ticket")):
+            raise FpaError("公用 Key 调用票据无效", 409, "shared_model_key")
     paths = task_paths(data_dir, task_id)
     now = utc_now()
     if not payload.get("success"):
         safe_error = sanitize_error(payload.get("error") or {})
+        record_call_failure(
+            db_path,
+            task_id,
+            source=model_call_source,
+            ticket=model_call_ticket,
+            user_id=task["created_by"],
+            provider=str(payload.get("provider") or ""),
+            model_name=str(payload.get("model") or ""),
+            error_summary=safe_error.get("message", "模型调用失败"),
+        )
         (paths.ai_dir / "AI调用错误.json").write_text(json.dumps(safe_error, ensure_ascii=False, indent=2), encoding="utf-8")
         fail_task(db_path, task_id, "ai_call", safe_error.get("message", "模型调用失败"), json.dumps(safe_error, ensure_ascii=False))
         register_file(db_path, data_dir, task_id, "ai_call_error", paths.ai_dir / "AI调用错误.json", admin_only=True)
@@ -766,8 +798,28 @@ def handle_ai_result(db_path: Path, data_dir: Path, task_id: str, user: dict[str
                 ),
             )
             conn.commit()
+        if model_call_source == SOURCE_PERSONAL:
+            record_personal_call(
+                db_path,
+                task_id,
+                task["created_by"],
+                provider=str(payload.get("provider") or ""),
+                model_name=str(payload.get("model") or ""),
+            )
+        elif model_call_source == SOURCE_SHARED:
+            deduct_shared_quota_once(db_path, task_id, excel_exists=(paths.output_dir / "FPA工作量评估.xlsx").exists())
         return {"task": {"id": task_id, "status": "completed", "status_label": STATUSES["completed"]}}
     except Exception as exc:
+        record_call_failure(
+            db_path,
+            task_id,
+            source=model_call_source,
+            ticket=model_call_ticket,
+            user_id=task["created_by"],
+            provider=str(payload.get("provider") or ""),
+            model_name=str(payload.get("model") or ""),
+            error_summary=str(exc),
+        )
         fail_task(db_path, task_id, getattr(exc, "stage", "ai_result"), str(exc), repr(exc))
         return {"task": {"id": task_id, "status": "failed", "status_label": STATUSES["failed"]}}
 

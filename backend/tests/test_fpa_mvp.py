@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from openpyxl import load_workbook
 
 from app.config import get_config
-from app.db import initialize_database, open_connection
+from app.db import hash_password, initialize_database, open_connection, utc_now
 from app.main import create_app
 
 
@@ -158,6 +158,49 @@ class FpaMvpTest(unittest.TestCase):
     def login(self, client: AsgiClient, username: str = "admin", password: str = "admin123") -> None:
         response = client.post("/api/auth/login", json={"username": username, "password": password})
         self.assertEqual(response.status_code, 200, response.text)
+
+    def add_user(
+        self,
+        db_path: Path,
+        *,
+        user_id: str,
+        username: str,
+        display_name: str,
+        password: str = "pass123",
+        role: str = "user",
+    ) -> None:
+        now = utc_now()
+        with open_connection(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO users(id, username, display_name, password_hash, role, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (user_id, username, display_name, hash_password(password), role, now, now),
+            )
+            conn.commit()
+
+    def save_shared_model_config(
+        self,
+        client: AsgiClient,
+        *,
+        enabled: bool = True,
+        api_key: str = "test-shared-secret",
+        default_quota: int = 10,
+    ) -> dict:
+        response = client.post(
+            "/api/admin/model-key/config",
+            json={
+                "enabled": enabled,
+                "provider": "deepseek",
+                "api_base": "https://api.deepseek.com",
+                "model_name": "deepseek-v4-flash",
+                "api_key": api_key,
+                "default_quota": default_quota,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["config"]
 
     def create_waiting_task(
         self,
@@ -865,6 +908,213 @@ class FpaMvpTest(unittest.TestCase):
             with open_connection(db_path) as conn:
                 columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
             self.assertIn("default_system_code", columns)
+
+    def test_model_key_admin_config_and_quota_management(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            db_path = tmp_path / "teamtools-test.db"
+            client = self.make_client(tmp_path)
+            self.login(client, "admin", "admin123")
+
+            config = self.save_shared_model_config(client, default_quota=10)
+            self.assertTrue(config["enabled"])
+            self.assertTrue(config["has_api_key"])
+            self.assertNotIn("api_key", config)
+            self.assertNotIn("test-shared-secret", json.dumps(config, ensure_ascii=False))
+
+            quotas = client.get("/api/admin/model-key/quotas")
+            self.assertEqual(quotas.status_code, 200, quotas.text)
+            quota_by_user = {item["username"]: item for item in quotas.json()["items"]}
+            self.assertEqual(quota_by_user["demo"]["quota_total"], 10)
+            self.assertEqual(quota_by_user["demo"]["used_count"], 0)
+            self.assertEqual(quota_by_user["demo"]["remaining"], 10)
+
+            self.save_shared_model_config(client, api_key="", default_quota=3)
+            self.add_user(db_path, user_id="dev-alice", username="alice", display_name="Alice")
+            quotas = client.get("/api/admin/model-key/quotas")
+            quota_by_user = {item["username"]: item for item in quotas.json()["items"]}
+            self.assertEqual(quota_by_user["demo"]["quota_total"], 10)
+            self.assertEqual(quota_by_user["alice"]["quota_total"], 3)
+
+            single = client.post("/api/admin/model-key/quotas/dev-demo", json={"enabled": False, "quota_total": 2})
+            self.assertEqual(single.status_code, 200, single.text)
+            self.assertFalse(single.json()["quota"]["enabled"])
+            self.assertEqual(single.json()["quota"]["quota_total"], 2)
+
+            reset = client.post("/api/admin/model-key/quotas/dev-demo/reset", json={})
+            self.assertEqual(reset.status_code, 200, reset.text)
+            self.assertEqual(reset.json()["quota"]["used_count"], 0)
+
+            bulk_set = client.post("/api/admin/model-key/quotas/bulk-set", json={"quota_total": 7})
+            self.assertEqual(bulk_set.status_code, 200, bulk_set.text)
+            bulk_reset = client.post("/api/admin/model-key/quotas/bulk-reset", json={})
+            self.assertEqual(bulk_reset.status_code, 200, bulk_reset.text)
+            quotas = client.get("/api/admin/model-key/quotas")
+            self.assertTrue(all(item["quota_total"] == 7 for item in quotas.json()["items"]))
+            self.assertTrue(all(item["used_count"] == 0 for item in quotas.json()["items"]))
+
+            client.post("/api/auth/logout")
+            self.login(client, "demo", "demo123")
+            self.assertEqual(client.get("/api/admin/model-key/config").status_code, 403)
+            self.assertEqual(client.get("/api/admin/model-key/quotas").status_code, 403)
+            self.assertEqual(client.post("/api/admin/model-key/quotas/dev-demo", json={"quota_total": 1}).status_code, 403)
+
+    def test_shared_model_key_issue_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client, "demo", "demo123")
+            task_id = self.create_waiting_task(client, system_code="onlineclaim", title="领取公用 Key")
+
+            disabled = client.post(f"/api/fpa/tasks/{task_id}/shared-model-key", json={})
+            self.assertEqual(disabled.status_code, 409)
+
+            client.post("/api/auth/logout")
+            self.login(client, "admin", "admin123")
+            self.save_shared_model_config(client, enabled=True, api_key="", default_quota=1)
+            client.post("/api/auth/logout")
+            self.login(client, "demo", "demo123")
+            missing_key = client.post(f"/api/fpa/tasks/{task_id}/shared-model-key", json={})
+            self.assertEqual(missing_key.status_code, 409)
+
+            client.post("/api/auth/logout")
+            self.login(client, "admin", "admin123")
+            self.save_shared_model_config(client, enabled=True, api_key="test-shared-secret", default_quota=1)
+            client.post("/api/auth/logout")
+            self.login(client, "demo", "demo123")
+            issued = client.post(f"/api/fpa/tasks/{task_id}/shared-model-key", json={})
+            self.assertEqual(issued.status_code, 200, issued.text)
+            body = issued.json()
+            self.assertEqual(body["provider"], "deepseek")
+            self.assertEqual(body["model"], "deepseek-v4-flash")
+            self.assertEqual(body["api_key"], "test-shared-secret")
+            self.assertTrue(body["ticket"])
+            self.assertEqual(body["quota"]["remaining"], 1)
+
+            with open_connection(tmp_path / "teamtools-test.db") as conn:
+                conn.execute("UPDATE user_model_quotas SET used_count = quota_total WHERE user_id = ?", ("dev-demo",))
+                conn.commit()
+            insufficient = client.post(f"/api/fpa/tasks/{task_id}/shared-model-key", json={})
+            self.assertEqual(insufficient.status_code, 409)
+            self.assertIn("公用apikey个人用量已用完，请输入可用的apikey", insufficient.text)
+
+            client.post("/api/auth/logout")
+            self.login(client, "admin", "admin123")
+            admin_task = self.create_waiting_task(client, title="管理员任务")
+            client.post("/api/auth/logout")
+            self.login(client, "demo", "demo123")
+            other_user = client.post(f"/api/fpa/tasks/{admin_task}/shared-model-key", json={})
+            self.assertEqual(other_user.status_code, 404)
+
+            with open_connection(tmp_path / "teamtools-test.db") as conn:
+                conn.execute("UPDATE user_model_quotas SET used_count = 0 WHERE user_id = ?", ("dev-demo",))
+                conn.execute("UPDATE tasks SET status = 'validating_result' WHERE id = ?", (task_id,))
+                conn.commit()
+            wrong_status = client.post(f"/api/fpa/tasks/{task_id}/shared-model-key", json={})
+            self.assertEqual(wrong_status.status_code, 409)
+
+    def test_shared_key_success_deducts_once_and_personal_key_does_not(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client, "admin", "admin123")
+            self.save_shared_model_config(client, enabled=True, api_key="test-shared-secret", default_quota=10)
+            client.post("/api/auth/logout")
+            self.login(client, "demo", "demo123")
+
+            shared_task_id = self.create_waiting_task(client, system_code="onlineclaim", title="公用 Key 成功扣减")
+            issued = client.post(f"/api/fpa/tasks/{shared_task_id}/shared-model-key", json={})
+            ticket = issued.json()["ticket"]
+            result = client.post(
+                f"/api/fpa/tasks/{shared_task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "model_call_source": "shared_key",
+                    "model_call_ticket": ticket,
+                    "structured_json": self.structured_for_system(system_code="onlineclaim", system_name="在线理赔服务平台"),
+                },
+            )
+            self.assertEqual(result.status_code, 200, result.text)
+            detail = client.get(f"/api/fpa/tasks/{shared_task_id}")
+            self.assertEqual(detail.json()["model_quota"]["used_count"], 1)
+            self.assertEqual(detail.json()["model_quota"]["remaining"], 9)
+            self.assertNotIn("test-shared-secret", json.dumps(detail.json(), ensure_ascii=False))
+
+            from app.modules.model_keys.service import deduct_shared_quota_once
+
+            deducted_again = deduct_shared_quota_once(tmp_path / "teamtools-test.db", shared_task_id, excel_exists=True)
+            self.assertFalse(deducted_again["deducted"])
+            detail_after_repeat = client.get(f"/api/fpa/tasks/{shared_task_id}")
+            self.assertEqual(detail_after_repeat.json()["model_quota"]["used_count"], 1)
+
+            personal_task_id = self.create_waiting_task(client, system_code="onlineclaim", title="个人 Key 不扣减")
+            personal = client.post(
+                f"/api/fpa/tasks/{personal_task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "model_call_source": "personal_key",
+                    "structured_json": self.structured_for_system(system_code="onlineclaim", system_name="在线理赔服务平台"),
+                },
+            )
+            self.assertEqual(personal.status_code, 200, personal.text)
+            personal_detail = client.get(f"/api/fpa/tasks/{personal_task_id}")
+            self.assertEqual(personal_detail.json()["model_quota"]["used_count"], 1)
+
+            with open_connection(tmp_path / "teamtools-test.db") as conn:
+                events = conn.execute("SELECT * FROM model_call_events").fetchall()
+            dumped_events = json.dumps([dict(row) for row in events], ensure_ascii=False)
+            self.assertNotIn("test-shared-secret", dumped_events)
+            self.assertIn("shared_key", dumped_events)
+            self.assertIn("personal_key", dumped_events)
+
+    def test_shared_key_failures_do_not_deduct(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client, "admin", "admin123")
+            self.save_shared_model_config(client, enabled=True, api_key="test-shared-secret", default_quota=10)
+            client.post("/api/auth/logout")
+            self.login(client, "demo", "demo123")
+
+            call_failed_task = self.create_waiting_task(client, system_code="onlineclaim", title="模型调用失败不扣减")
+            call_failed_ticket = client.post(f"/api/fpa/tasks/{call_failed_task}/shared-model-key", json={}).json()["ticket"]
+            failed = client.post(
+                f"/api/fpa/tasks/{call_failed_task}/ai-result",
+                json={
+                    "success": False,
+                    "model_call_source": "shared_key",
+                    "model_call_ticket": call_failed_ticket,
+                    "error": {"message": "上游失败 sk-should-redact"},
+                },
+            )
+            self.assertEqual(failed.status_code, 200, failed.text)
+            detail = client.get(f"/api/fpa/tasks/{call_failed_task}")
+            self.assertEqual(detail.json()["model_quota"]["used_count"], 0)
+            self.assertNotIn("sk-should-redact", detail.text)
+
+            validation_failed_task = self.create_waiting_task(client, system_code="onlineclaim", title="校验失败不扣减")
+            validation_ticket = client.post(f"/api/fpa/tasks/{validation_failed_task}/shared-model-key", json={}).json()["ticket"]
+            invalid_structured = self.structured_for_system(system_code="onlineclaim", system_name="在线理赔服务平台")
+            invalid_structured["frozen_items"][0]["category"] = "BAD"
+            invalid = client.post(
+                f"/api/fpa/tasks/{validation_failed_task}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "model_call_source": "shared_key",
+                    "model_call_ticket": validation_ticket,
+                    "structured_json": invalid_structured,
+                },
+            )
+            self.assertEqual(invalid.status_code, 200, invalid.text)
+            detail_after_validation = client.get(f"/api/fpa/tasks/{validation_failed_task}")
+            self.assertEqual(detail_after_validation.json()["task"]["failure_stage"], "json_validation")
+            self.assertEqual(detail_after_validation.json()["model_quota"]["used_count"], 0)
 
 
 if __name__ == "__main__":

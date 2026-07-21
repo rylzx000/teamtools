@@ -1,0 +1,17 @@
+{
+  "change": "shared-frontend-model-key-quota",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "c3bbab4edb102061199c7d34ef4c9a7ee8cc860f29454478d407d36dbec4efb1",
+  "files": [
+    { "path": "openspec/changes/shared-frontend-model-key-quota/proposal.md", "sha256": "35b5291b0a069cbd675678e5f4d8a13968c7df8b4e052e3b27dcca66b560983d" },
+    { "path": "openspec/changes/shared-frontend-model-key-quota/design.md", "sha256": "bd1309076c61141464c80037c7344ae8560c69e55146fbba049cf9144886b73d" },
+    { "path": "openspec/changes/shared-frontend-model-key-quota/tasks.md", "sha256": "d32f77afe9bc21e11351121f92232ddac83db2dcea6714b642d9d7e294deab93" },
+    { "path": "openspec/changes/shared-frontend-model-key-quota/specs/fpa-interface-ui/spec.md", "sha256": "ce1bee71e0e529b2e822734789998cfa115f857b1b4421e90c361d920f748057" },
+    { "path": "openspec/changes/shared-frontend-model-key-quota/specs/fpa-workflow/spec.md", "sha256": "20a54f0e1f9e53dc50dbd0fa2209d752b9b4c8f337f3196cccb44b78918785af" },
+    { "path": "openspec/changes/shared-frontend-model-key-quota/specs/model-key-quota/spec.md", "sha256": "e22dc9640a04c3e92d4cb60fb3e8828b3c1ec62e1d15e7d87fa7883e3cf43152" },
+    { "path": "openspec/changes/shared-frontend-model-key-quota/specs/platform-architecture/spec.md", "sha256": "c32eb51b5de48bc75a86fa9eda3ab42de03c69e6078f53845940cbceec64db87" }
+  ]
+}
