@@ -2,15 +2,15 @@
 
 内网工具平台的技术底座。
 
-当前阶段只做工程基础、架构设计和首个 FPA 模块设计，不做未确认的业务功能扩展。
+当前阶段已具备 FPA 模块 MVP，可用于内网 Docker 单机部署验证。
 
 ## 当前范围
 
 - 前端：React + TypeScript + Vite
 - 后端：FastAPI
 - 数据库：SQLite
-- 后台执行：Worker 进程
-- 部署方式：单机、无 Docker、无 Nginx
+- 模型调用：用户浏览器直连外部模型，后端不保存 API Key
+- 部署方式：Docker Compose 单机部署、无 Nginx
 
 ## 目录
 
@@ -44,8 +44,31 @@ D:\project\teamtools\data
 - `http://127.0.0.1:8000` 可访问
 - `GET /api/health` 可返回健康状态
 - 前端页面可被后端托管
-- Worker 可独立启动
 - SQLite 可初始化
+
+## Docker 部署
+
+复制环境变量样例：
+
+```bash
+cp .env.example .env
+```
+
+启动：
+
+```bash
+mkdir -p data logs
+docker compose build
+docker compose up -d
+```
+
+创建管理员账号：
+
+```bash
+docker compose exec teamtools python scripts/create-user.py --username admin --display-name 管理员 --role admin
+```
+
+更多步骤见 `docs/deployment/02-服务器部署.md`。
 
 ## 编码检查
 

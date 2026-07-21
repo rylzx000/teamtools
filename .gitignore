@@ -8,6 +8,7 @@ data/*.sqlite
 data/*.sqlite3
 .env
 .env.*
+!.env.example
 .codex/settings.local.json
 backend/*.egg-info/
 *.log
