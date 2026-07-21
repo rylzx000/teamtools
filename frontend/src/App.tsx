@@ -85,6 +85,17 @@ type SharedModelKeyResponse = {
   quota: ModelQuota;
 };
 
+type PageMeta = {
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+  has_next: boolean;
+  has_prev: boolean;
+};
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50];
+
 type ResultSummary = {
   item_count?: number;
   function_point_total?: number;
@@ -323,6 +334,102 @@ function Shell({
 }
 
 
+
+function defaultPageMeta(page = 1, pageSize = 20): PageMeta {
+  return { total: 0, page, page_size: pageSize, pages: 0, has_next: false, has_prev: false };
+}
+
+function pageMetaFrom(data: Partial<PageMeta>, fallbackPage: number, fallbackPageSize: number): PageMeta {
+  const total = Number(data.total ?? 0);
+  const pageSize = Number(data.page_size ?? fallbackPageSize);
+  const pages = Number(data.pages ?? (total ? Math.ceil(total / pageSize) : 0));
+  const page = Number(data.page ?? fallbackPage);
+  return {
+    total,
+    page,
+    page_size: pageSize,
+    pages,
+    has_next: Boolean(data.has_next),
+    has_prev: Boolean(data.has_prev),
+  };
+}
+
+function usePaginationState(initialPageSize = 20) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(initialPageSize);
+  const [meta, setMeta] = useState<PageMeta>(() => defaultPageMeta(1, initialPageSize));
+
+  function changePage(nextPage: number) {
+    setPage(Math.max(1, nextPage));
+  }
+
+  function changePageSize(nextPageSize: number) {
+    setPageSize(nextPageSize);
+    setPage(1);
+  }
+
+  function resetPage() {
+    setPage(1);
+  }
+
+  return { page, pageSize, meta, setMeta, changePage, changePageSize, resetPage };
+}
+
+function pageNumberItems(meta: PageMeta): Array<number | string> {
+  if (meta.pages <= 0) return [];
+  if (meta.pages <= 7) return Array.from({ length: meta.pages }, (_, index) => index + 1);
+  const middle = [meta.page - 1, meta.page, meta.page + 1].filter((page) => page > 1 && page < meta.pages);
+  const pages = Array.from(new Set([1, ...middle, meta.pages])).sort((left, right) => left - right);
+  return pages.flatMap((page, index) => {
+    const previous = pages[index - 1];
+    return previous && page - previous > 1 ? [`gap-${previous}-${page}`, page] : [page];
+  });
+}
+
+function PaginationBar({
+  meta,
+  disabled = false,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  meta: PageMeta;
+  disabled?: boolean;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}) {
+  const currentPage = meta.pages ? meta.page : 0;
+  return (
+    <div className="pagination-bar">
+      <span className="pagination-meta">共 <strong>{meta.total}</strong> 条</span>
+      <div className="pagination-controls">
+        <label className="page-size-field">
+          每页
+          <select value={meta.page_size} onChange={(event) => onPageSizeChange(Number(event.target.value))} disabled={disabled}>
+            {PAGE_SIZE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>
+        <button className="mini-button" type="button" onClick={() => onPageChange(meta.page - 1)} disabled={disabled || !meta.has_prev}>上一页</button>
+        <div className="page-number-list" aria-label="分页页码">
+          {pageNumberItems(meta).map((item) => typeof item === 'number' ? (
+            <button
+              className={`mini-button page-number ${item === meta.page ? 'active' : ''}`}
+              key={item}
+              type="button"
+              onClick={() => onPageChange(item)}
+              disabled={disabled || item === meta.page}
+              aria-current={item === meta.page ? 'page' : undefined}
+            >
+              {item}
+            </button>
+          ) : <span className="pagination-page-gap" key={item}>...</span>)}
+        </div>
+        <span className="pagination-page">第 {currentPage} / {meta.pages} 页</span>
+        <button className="mini-button" type="button" onClick={() => onPageChange(meta.page + 1)} disabled={disabled || !meta.has_next}>下一页</button>
+      </div>
+    </div>
+  );
+}
+
 function TasksPage({
   user,
   navigate,
@@ -338,12 +445,19 @@ function TasksPage({
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [showAdminFields, setShowAdminFields] = useState(true);
+  const pagination = usePaginationState();
 
   async function loadTasks() {
     setLoading(true);
-    const status = filter === 'all' || filter === 'running' ? '' : filter;
-    const data = await api(`/api/fpa/tasks${status ? `?status=${status}` : ''}`);
-    setTasks(data.items);
+    const params = new URLSearchParams({
+      page: String(pagination.page),
+      page_size: String(pagination.pageSize),
+    });
+    const status = filter === 'all' ? '' : filter;
+    if (status) params.set('status', status);
+    const data = await api(`/api/fpa/tasks?${params.toString()}`);
+    setTasks(data.items || []);
+    pagination.setMeta(pageMetaFrom(data, pagination.page, pagination.pageSize));
     setLoading(false);
     const refreshTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     setLastRefresh(refreshTime);
@@ -351,7 +465,12 @@ function TasksPage({
 
   useEffect(() => {
     loadTasks().catch((err) => setNotice(err instanceof Error ? err.message : '加载失败'));
-  }, [filter]);
+  }, [filter, pagination.page, pagination.pageSize]);
+
+  function changeFilter(nextFilter: string) {
+    setFilter(nextFilter);
+    pagination.resetPage();
+  }
 
   const visibleTasks = useMemo(() => {
     if (filter !== 'running') return tasks;
@@ -374,7 +493,7 @@ function TasksPage({
             ['failed', '失败'],
             ['canceled', '已取消'],
           ].map(([value, label]) => (
-            <button key={value} className={`filter-chip ${filter === value ? 'active' : ''}`} onClick={() => setFilter(value)}>{label}</button>
+            <button key={value} className={`filter-chip ${filter === value ? 'active' : ''}`} onClick={() => changeFilter(value)}>{label}</button>
           ))}
           <button className="filter-chip refresh-chip" type="button" onClick={() => loadTasks()}>手动刷新</button>
         </div>
@@ -431,6 +550,12 @@ function TasksPage({
             </tbody>
           </table>
         </div>
+        <PaginationBar
+          meta={pagination.meta}
+          disabled={loading}
+          onPageChange={pagination.changePage}
+          onPageSizeChange={pagination.changePageSize}
+        />
       </section>
     </>
   );
@@ -701,15 +826,21 @@ function ModelConfigPage({ setNotice }: { setNotice: (value: string) => void }) 
   const [bulkQuota, setBulkQuota] = useState('10');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const quotaPagination = usePaginationState();
 
   async function loadAll() {
     setLoading(true);
+    const quotaParams = new URLSearchParams({
+      page: String(quotaPagination.page),
+      page_size: String(quotaPagination.pageSize),
+    });
     const [configData, quotaData] = await Promise.all([
       api('/api/admin/model-key/config'),
-      api('/api/admin/model-key/quotas'),
+      api(`/api/admin/model-key/quotas?${quotaParams.toString()}`),
     ]);
     setConfig(configData.config);
-    setQuotas(quotaData.items);
+    setQuotas(quotaData.items || []);
+    quotaPagination.setMeta(pageMetaFrom(quotaData, quotaPagination.page, quotaPagination.pageSize));
     setBulkQuota(String(configData.config.default_quota ?? 10));
     setLoading(false);
   }
@@ -719,7 +850,7 @@ function ModelConfigPage({ setNotice }: { setNotice: (value: string) => void }) 
       setError(err instanceof Error ? err.message : '模型配置加载失败');
       setLoading(false);
     });
-  }, []);
+  }, [quotaPagination.page, quotaPagination.pageSize]);
 
   function updateConfig<K extends keyof ModelKeyConfig>(key: K, value: ModelKeyConfig[K]) {
     if (!config) return;
@@ -855,6 +986,12 @@ function ModelConfigPage({ setNotice }: { setNotice: (value: string) => void }) 
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            meta={quotaPagination.meta}
+            disabled={loading}
+            onPageChange={quotaPagination.changePage}
+            onPageSizeChange={quotaPagination.changePageSize}
+          />
         </section>
       </section>
     </>

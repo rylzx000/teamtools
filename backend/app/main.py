@@ -155,10 +155,13 @@ def create_app(
         return {"config": save_model_key_config(app_db_path, user, payload)}
 
     @app.get("/api/admin/model-key/quotas")
-    async def admin_model_key_quotas(request: Request) -> dict[str, Any]:
+    async def admin_model_key_quotas(
+        request: Request,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
         require_admin(request)
-        items = list_admin_quotas(app_db_path)
-        return {"items": items, "total": len(items)}
+        return list_admin_quotas(app_db_path, page=page, page_size=page_size)
 
     @app.post("/api/admin/model-key/quotas/bulk-set")
     async def admin_model_key_quotas_bulk_set(request: Request) -> dict[str, Any]:
@@ -213,8 +216,13 @@ def create_app(
         )
 
     @app.get("/api/fpa/tasks")
-    async def fpa_list_tasks(request: Request, status: str | None = None) -> dict[str, Any]:
-        return list_tasks(app_db_path, require_user(request), status)
+    async def fpa_list_tasks(
+        request: Request,
+        status: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return list_tasks(app_db_path, require_user(request), status, page=page, page_size=page_size)
 
     @app.get("/api/fpa/tasks/{task_id}")
     async def fpa_get_task(request: Request, task_id: str) -> dict[str, Any]:

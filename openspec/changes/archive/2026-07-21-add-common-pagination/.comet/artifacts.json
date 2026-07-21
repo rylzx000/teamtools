@@ -1,0 +1,8 @@
+{
+  "openspec_proposal": "openspec/changes/shared-frontend-model-key-quota/proposal.md",
+  "openspec_design": "openspec/changes/shared-frontend-model-key-quota/design.md",
+  "openspec_tasks": "openspec/changes/shared-frontend-model-key-quota/tasks.md",
+  "openspec_delta_spec": "openspec/changes/shared-frontend-model-key-quota/specs/fpa-interface-ui/spec.md",
+  "build_tasks_complete": "openspec/changes/shared-frontend-model-key-quota/tasks.md",
+  "archive_directory": "openspec/changes/archive/2026-07-21-add-common-pagination"
+}

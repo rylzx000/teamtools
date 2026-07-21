@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from ...db import fetch_all, fetch_one, open_connection, utc_now, write_task_event
+from ...pagination import paginated_response, parse_pagination
 from ..model_keys.service import (
     SOURCE_PERSONAL,
     SOURCE_SHARED,
@@ -488,16 +489,37 @@ def issue_shared_model_key(db_path: Path, task_id: str, user: dict[str, Any]) ->
     return issue_shared_key(db_path, task)
 
 
-def list_tasks(db_path: Path, user: dict[str, Any], status: str | None = None) -> dict[str, Any]:
+def list_tasks(
+    db_path: Path,
+    user: dict[str, Any],
+    status: str | None = None,
+    page: Any = None,
+    page_size: Any = None,
+) -> dict[str, Any]:
+    pagination = parse_pagination(page, page_size)
     params: list[Any] = []
     where = "t.module = 'fpa'"
     if user["role"] != "admin":
         where += " AND t.created_by = ?"
         params.append(user["id"])
     if status:
-        where += " AND t.status = ?"
-        params.append(status)
+        if status == "running":
+            where += " AND t.status IN ('waiting_ai_call', 'validating_result', 'generating_result')"
+        elif status in {"canceled", "cancelled"}:
+            where += " AND t.status IN ('canceled', 'cancelled')"
+        else:
+            where += " AND t.status = ?"
+            params.append(status)
     with open_connection(db_path) as conn:
+        total_row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM tasks t
+            JOIN fpa_task_details d ON d.task_id = t.id
+            WHERE {where}
+            """,
+            tuple(params),
+        ).fetchone()
         rows = fetch_all(
             conn,
             f"""
@@ -508,12 +530,13 @@ def list_tasks(db_path: Path, user: dict[str, Any], status: str | None = None) -
             JOIN fpa_task_details d ON d.task_id = t.id
             JOIN users u ON u.id = t.created_by
             WHERE {where}
-            ORDER BY t.created_at DESC
+            ORDER BY t.created_at DESC, t.id DESC
+            LIMIT ? OFFSET ?
             """,
-            tuple(params),
+            tuple([*params, pagination.limit, pagination.offset]),
         )
     items = [public_task(row) for row in rows]
-    return {"items": items, "page": 1, "page_size": len(items), "total": len(items)}
+    return paginated_response(items, int(total_row["total"] if total_row else 0), pagination)
 
 
 def task_detail(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any]) -> dict[str, Any]:

@@ -10,7 +10,7 @@ import zipfile
 from copy import deepcopy
 from pathlib import Path
 from http.cookies import SimpleCookie
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from openpyxl import load_workbook
 
@@ -56,6 +56,8 @@ class AsgiClient:
     async def _request(self, method: str, path: str, *, json=None, data=None):
         import json as json_module
 
+        parsed_url = urlsplit(path)
+        route_path = parsed_url.path or "/"
         headers: list[tuple[bytes, bytes]] = []
         body = b""
         if json is not None:
@@ -93,9 +95,9 @@ class AsgiClient:
             "type": "http",
             "asgi": {"version": "3.0"},
             "method": method,
-            "path": path,
-            "raw_path": path.encode("ascii"),
-            "query_string": b"",
+            "path": route_path,
+            "raw_path": route_path.encode("ascii"),
+            "query_string": parsed_url.query.encode("ascii"),
             "headers": headers,
             "client": ("testclient", 50000),
             "server": ("testserver", 80),
@@ -300,6 +302,92 @@ class FpaMvpTest(unittest.TestCase):
             dumped = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn("knowledge_dir", dumped)
             self.assertNotIn(str(tmp_path / "data"), dumped)
+
+    def test_fpa_task_list_paginates_defaults_limits_and_sorts_newest_first(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client, "demo", "demo123")
+            old_task_id = self.create_waiting_task(client, title="旧任务")
+            mid_task_id = self.create_waiting_task(client, title="中间任务")
+            new_task_id = self.create_waiting_task(client, title="新任务")
+
+            with open_connection(tmp_path / "teamtools-test.db") as conn:
+                for task_id, created_at in [
+                    (old_task_id, "2026-07-20T01:00:00+00:00"),
+                    (mid_task_id, "2026-07-20T02:00:00+00:00"),
+                    (new_task_id, "2026-07-20T03:00:00+00:00"),
+                ]:
+                    conn.execute(
+                        "UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?",
+                        (created_at, created_at, task_id),
+                    )
+                conn.commit()
+
+            default_page = client.get("/api/fpa/tasks")
+            self.assertEqual(default_page.status_code, 200, default_page.text)
+            self.assertEqual(default_page.json()["page"], 1)
+            self.assertEqual(default_page.json()["page_size"], 20)
+            self.assertEqual(default_page.json()["total"], 3)
+            self.assertEqual(default_page.json()["pages"], 1)
+
+            first_page = client.get("/api/fpa/tasks?page=1&page_size=2")
+            self.assertEqual(first_page.status_code, 200, first_page.text)
+            first_body = first_page.json()
+            self.assertEqual([item["id"] for item in first_body["items"]], [new_task_id, mid_task_id])
+            self.assertEqual(first_body["total"], 3)
+            self.assertEqual(first_body["pages"], 2)
+            self.assertTrue(first_body["has_next"])
+            self.assertFalse(first_body["has_prev"])
+
+            second_page = client.get("/api/fpa/tasks?page=2&page_size=2")
+            self.assertEqual(second_page.status_code, 200, second_page.text)
+            second_body = second_page.json()
+            self.assertEqual([item["id"] for item in second_body["items"]], [old_task_id])
+            self.assertFalse(second_body["has_next"])
+            self.assertTrue(second_body["has_prev"])
+
+            capped = client.get("/api/fpa/tasks?page_size=500")
+            self.assertEqual(capped.status_code, 200, capped.text)
+            self.assertEqual(capped.json()["page_size"], 100)
+
+    def test_admin_quota_list_paginates_and_sorts_admins_first(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            db_path = tmp_path / "teamtools-test.db"
+            client = self.make_client(tmp_path)
+            self.login(client, "admin", "admin123")
+            self.add_user(db_path, user_id="dev-alice", username="alice", display_name="Alice")
+            self.add_user(db_path, user_id="dev-bob", username="bob", display_name="Bob")
+            self.add_user(
+                db_path,
+                user_id="dev-zzadmin",
+                username="zzadmin",
+                display_name="ZZ Admin",
+                role="admin",
+            )
+
+            first_page = client.get("/api/admin/model-key/quotas?page=1&page_size=3")
+            self.assertEqual(first_page.status_code, 200, first_page.text)
+            first_body = first_page.json()
+            self.assertEqual(first_body["page"], 1)
+            self.assertEqual(first_body["page_size"], 3)
+            self.assertEqual(first_body["total"], 5)
+            self.assertEqual(first_body["pages"], 2)
+            self.assertTrue(first_body["has_next"])
+            self.assertFalse(first_body["has_prev"])
+            self.assertEqual([item["username"] for item in first_body["items"]], ["admin", "zzadmin", "alice"])
+
+            second_page = client.get("/api/admin/model-key/quotas?page=2&page_size=3")
+            self.assertEqual(second_page.status_code, 200, second_page.text)
+            second_body = second_page.json()
+            self.assertEqual([item["username"] for item in second_body["items"]], ["bob", "demo"])
+            self.assertFalse(second_body["has_next"])
+            self.assertTrue(second_body["has_prev"])
+
+            capped = client.get("/api/admin/model-key/quotas?page_size=500")
+            self.assertEqual(capped.status_code, 200, capped.text)
+            self.assertEqual(capped.json()["page_size"], 100)
 
     def valid_structured_json(self) -> dict:
         sample = PROJECT_ROOT / "data" / "modules" / "fpa" / "examples" / "expected" / "AI结构化结果.sample.json"
@@ -956,7 +1044,7 @@ class FpaMvpTest(unittest.TestCase):
             client.post("/api/auth/logout")
             self.login(client, "demo", "demo123")
             self.assertEqual(client.get("/api/admin/model-key/config").status_code, 403)
-            self.assertEqual(client.get("/api/admin/model-key/quotas").status_code, 403)
+            self.assertEqual(client.get("/api/admin/model-key/quotas?page=1&page_size=10").status_code, 403)
             self.assertEqual(client.post("/api/admin/model-key/quotas/dev-demo", json={"quota_total": 1}).status_code, 403)
 
     def test_shared_model_key_issue_boundaries(self) -> None:

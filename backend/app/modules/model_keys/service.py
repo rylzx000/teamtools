@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ...db import fetch_all, fetch_one, open_connection, utc_now
+from ...pagination import paginated_response, parse_pagination
 
 
 CONFIG_ID = "shared_default"
@@ -66,23 +67,31 @@ def save_admin_config(db_path: Path, user: dict[str, Any], payload: dict[str, An
     return public_config(row)
 
 
-def list_admin_quotas(db_path: Path) -> list[dict[str, Any]]:
+def list_admin_quotas(db_path: Path, page: Any = None, page_size: Any = None) -> dict[str, Any]:
+    pagination = parse_pagination(page, page_size)
     with open_connection(db_path) as conn:
+        total_row = conn.execute("SELECT COUNT(*) AS total FROM users WHERE enabled = 1").fetchone()
         users = fetch_all(
             conn,
             """
             SELECT id, username, display_name, role
             FROM users
             WHERE enabled = 1
-            ORDER BY username
+            ORDER BY
+                CASE WHEN role = 'admin' THEN 0 ELSE 1 END,
+                username COLLATE NOCASE,
+                display_name COLLATE NOCASE,
+                id
+            LIMIT ? OFFSET ?
             """,
+            (pagination.limit, pagination.offset),
         )
         items = []
         for user in users:
             quota = get_or_create_quota(conn, user["id"])
             items.append(public_quota(quota, user))
         conn.commit()
-    return items
+    return paginated_response(items, int(total_row["total"] if total_row else 0), pagination)
 
 
 def save_user_quota(db_path: Path, target_user_id: str, admin_user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
