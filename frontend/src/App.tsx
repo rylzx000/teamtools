@@ -38,6 +38,7 @@ type TaskDetail = {
     system_code: string;
     error_summary?: string | null;
     quality_flags?: unknown[];
+    parse_warnings?: Array<{ code: string; message: string }>;
     can_fetch_ai_request: boolean;
     can_submit_ai_result: boolean;
   };
@@ -612,6 +613,7 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
   const [countTiming, setCountTiming] = useState('估算中期');
   const [integrityLevel, setIntegrityLevel] = useState('完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式');
   const [inputText, setInputText] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileText, setFileText] = useState('');
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState<number | null>(null);
@@ -654,21 +656,38 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
 
   async function readFile(file: File | undefined) {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.md')) {
-      setError('只支持上传 .md 文件');
+    const lowerName = file.name.toLowerCase();
+    const isMarkdown = lowerName.endsWith('.md');
+    const isDocx = lowerName.endsWith('.docx');
+    if (lowerName.endsWith('.doc')) {
+      clearFile();
+      setError('暂不支持 .doc，请另存为 .docx 后上传');
       return;
     }
-    if (file.size > 256 * 1024) {
-      setError('上传文件不能超过 256KB');
+    if (!isMarkdown && !isDocx) {
+      clearFile();
+      setError('上传文件仅支持 Markdown .md 或 Word .docx 文档');
       return;
     }
+    if (isMarkdown && file.size > 256 * 1024) {
+      clearFile();
+      setError('Markdown 文件不能超过 256KB');
+      return;
+    }
+    if (isDocx && file.size > 10 * 1024 * 1024) {
+      clearFile();
+      setError('Word .docx 文件不能超过 10MB');
+      return;
+    }
+    setSelectedFile(file);
     setFileName(file.name);
     setFileSize(file.size);
-    setFileText(await file.text());
+    setFileText(isMarkdown ? await file.text() : '');
     setError('');
   }
 
   function clearFile() {
+    setSelectedFile(null);
     setFileName('');
     setFileSize(null);
     setFileText('');
@@ -688,14 +707,13 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
       setError(targetDaysError);
       return;
     }
-    const form = new URLSearchParams();
+    const form = new FormData();
     form.set('system_code', systemCode);
     form.set('title', title);
     form.set('input_text', inputText);
-    form.set('uploaded_text', fileText);
-    form.set('uploaded_name', fileName);
     form.set('count_timing', countTiming);
     form.set('integrity_level', integrityLevel);
+    if (selectedFile) form.set('input_file', selectedFile, selectedFile.name);
     if (targetDays.trim()) form.set('target_person_days', targetDays.trim());
     try {
       const trimmedKey = submitApiKey.trim();
@@ -711,7 +729,6 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
       }
       const data = await api('/api/fpa/tasks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: form,
       });
       setNotice('任务已创建，AI 请求包已生成');
@@ -721,7 +738,7 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
     }
   }
 
-  const disabled = !systemCode || (!inputText.trim() && !fileText.trim()) || Boolean(targetDaysError);
+  const disabled = !systemCode || (!inputText.trim() && !selectedFile) || Boolean(targetDaysError);
 
   return (
     <>
@@ -776,11 +793,11 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
             onDragLeave={(event) => { event.preventDefault(); setIsDragging(false); }}
             onDrop={handleDrop}
           >
-            <input key={fileInputKey} type="file" accept=".md,text/markdown,text/plain" onChange={(event) => readFile(event.target.files?.[0])} />
-            <span className="upload-icon" aria-hidden="true">MD</span>
-            <span>
-              <strong>{fileName ? '已选择 Markdown 文件' : '拖动 .md 文件到这里，或点击选择文件'}</strong>
-              <small>{fileName ? `${fileName} · ${formatFileSize(fileSize)}` : '文件不超过 256KB；可与粘贴内容同时提交。'}</small>
+            <input key={fileInputKey} type="file" accept=".md,.docx,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => readFile(event.target.files?.[0])} />
+            <span className="upload-icon" aria-hidden="true">MD/DOCX</span>
+            <span className="upload-copy">
+              <strong className="upload-title">{fileName ? '已选择文档' : '拖动 Markdown / Word 文档到这里，或点击选择文件'}</strong>
+              <small className="upload-help">{fileName ? `${fileName} · ${formatFileSize(fileSize)}` : 'Markdown 不超过 256KB，Word .docx 不超过 10MB。'}</small>
             </span>
             {fileName && <button className="mini-button" type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); clearFile(); }}>移除</button>}
           </label>
@@ -790,7 +807,9 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
           <h2>提交规则</h2>
           <ul className="rule-list">
             <li>粘贴内容和上传文件至少提供一个。</li>
-            <li>文本不超过 2 万字符，文件不超过 256KB。</li>
+            <li>正文不超过 2 万字符。</li>
+            <li>Markdown 不超过 256KB，Word .docx 不超过 10MB。</li>
+            <li>Word 图片内容会被忽略，请将关键图片信息补充为文字。</li>
             <li>目标人天最多 1 位小数。</li>
           </ul>
           {error && <div className="form-alert is-error">{error}</div>}
@@ -802,7 +821,7 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
               <h2>模型调用设置</h2>
               <span className="status muted">本机使用</span>
             </div>
-            <p className="model-brief">个人 Key 优先；留空时使用团队公用 Key</p>
+            <p className="model-brief">优先使用填写的个人 Key，若不填则使用公用 Key，可在任务详情页查看余额；个人 API Key 只保存在本机浏览器。</p>
             <label className="field model-key">
               <span>API Key</span>
               <input type="password" value={submitApiKey} onChange={(event) => setSubmitApiKey(event.target.value)} autoComplete="off" placeholder="本地 DeepSeek API Key" />
@@ -811,7 +830,6 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
               <input type="checkbox" checked={rememberSubmitApiKey} onChange={(event) => changeSubmitRemember(event.target.checked)} />
               记住到本机浏览器
             </label>
-            <p className="helper-text">个人 API Key 只保存在本机浏览器，不上传后端；留空时详情页会领取团队公用 Key。</p>
           </section>
         </aside>
       </form>
@@ -1134,6 +1152,7 @@ function DetailPage({
             modelQuota={detail.model_quota}
             calling={calling}
             callError={callError}
+            parseWarnings={task.parse_warnings}
             onCallModel={callModel}
           />
         </div>
@@ -1159,6 +1178,7 @@ function TaskSummaryCard({
   modelQuota,
   calling,
   callError,
+  parseWarnings,
   onCallModel,
 }: {
   task: TaskDetail['task'];
@@ -1168,6 +1188,7 @@ function TaskSummaryCard({
   modelQuota?: ModelQuota;
   calling: boolean;
   callError: string;
+  parseWarnings?: Array<{ code: string; message: string }>;
   onCallModel: () => void;
 }) {
   return (
@@ -1192,6 +1213,9 @@ function TaskSummaryCard({
         </div>
       )}
       {callError && <div className="form-alert is-error">{callError}</div>}
+      {parseWarnings?.map((warning) => (
+        <div className="form-alert" key={warning.code}>{warning.message}</div>
+      ))}
     </article>
   );
 }

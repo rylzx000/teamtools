@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_config
 from .db import fetch_one, initialize_database, open_connection, task_count, utc_now, verify_password
+from .modules.fpa.input_normalizer import UploadedRequirementFile
 from .modules.fpa.service import (
     FpaError,
     cancel_task,
@@ -198,6 +199,7 @@ def create_app(
         user = require_user(request)
         payload = await read_submission_payload(request)
         target = parse_optional_float(payload.get("target_person_days"))
+        uploaded_file = payload.get("uploaded_file")
         return create_task(
             app_db_path,
             app_data_dir,
@@ -206,6 +208,7 @@ def create_app(
             title=str(payload.get("title") or ""),
             input_text=str(payload.get("input_text") or ""),
             uploaded_text=str(payload.get("uploaded_text") or ""),
+            uploaded_file=uploaded_file if isinstance(uploaded_file, UploadedRequirementFile) else None,
             uploaded_name=str(payload.get("uploaded_name") or ""),
             target_person_days=target,
             count_timing=str(payload.get("count_timing") or "估算中期"),
@@ -325,7 +328,7 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
 
 async def read_submission_payload(request: Request) -> dict[str, Any]:
     payload = await read_payload(request)
-    if "input_file" in payload and not payload.get("uploaded_text"):
+    if "input_file" in payload and not payload.get("uploaded_text") and not payload.get("uploaded_file"):
         payload["uploaded_text"] = str(payload.get("input_file") or "")
     return payload
 
@@ -357,11 +360,16 @@ def parse_simple_multipart(body: bytes, content_type: str) -> dict[str, Any]:
         if not part or part == b"--" or b"\r\n\r\n" not in part:
             continue
         raw_headers, value = part.split(b"\r\n\r\n", 1)
-        value = value.rstrip(b"\r\n-")
+        if value.endswith(b"\r\n"):
+            value = value[:-2]
         headers_text = raw_headers.decode("utf-8", errors="ignore")
+        disposition = next(
+            (line for line in headers_text.splitlines() if line.lower().startswith("content-disposition:")),
+            headers_text,
+        )
         name = None
         filename = None
-        for segment in headers_text.split(";"):
+        for segment in disposition.split(";"):
             segment = segment.strip()
             if segment.startswith("name="):
                 name = segment.split("=", 1)[1].strip('"')
@@ -370,11 +378,7 @@ def parse_simple_multipart(body: bytes, content_type: str) -> dict[str, Any]:
         if not name:
             continue
         if filename:
-            if not filename.lower().endswith(".md"):
-                raise FpaError("上传文件只支持 Markdown", 400, "task_create")
-            if len(value) > 256 * 1024:
-                raise FpaError("上传文件不能超过 256KB", 400, "task_create")
-            payload["uploaded_text"] = value.decode("utf-8", errors="replace")
+            payload["uploaded_file"] = UploadedRequirementFile(filename=filename, content=value)
             payload["uploaded_name"] = filename
         else:
             payload[name] = value.decode("utf-8", errors="replace")

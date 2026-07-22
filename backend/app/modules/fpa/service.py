@@ -23,6 +23,8 @@ from ..model_keys.service import (
     record_call_failure,
     record_personal_call,
 )
+from .input_normalizer import UploadedRequirementFile, normalize_requirement_input
+from .service_errors import FpaError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
@@ -86,13 +88,6 @@ SYSTEMS = [
     {"code": "onlineclaim", "name": "在线理赔服务平台", "sort_order": 30, "knowledge_dir": "onlineclaim"},
     {"code": "clqp", "name": "零配件报价系统", "sort_order": 40, "knowledge_dir": "clqp"},
 ]
-
-
-class FpaError(RuntimeError):
-    def __init__(self, message: str, status_code: int = 400, stage: str = "validation"):
-        super().__init__(message)
-        self.status_code = status_code
-        self.stage = stage
 
 
 @dataclass(frozen=True)
@@ -299,6 +294,7 @@ def create_task(
     title: str | None,
     input_text: str | None,
     uploaded_text: str | None = None,
+    uploaded_file: UploadedRequirementFile | None = None,
     uploaded_name: str | None = None,
     target_person_days: float | None = None,
     count_timing: str = DEFAULT_COUNT_TIMING,
@@ -308,10 +304,11 @@ def create_task(
     ensure_resources(data_dir)
     input_text = (input_text or "").strip()
     uploaded_text = (uploaded_text or "").strip()
-    if not input_text and not uploaded_text:
-        raise FpaError("请粘贴需求文本或上传 Markdown 文件", 400, "task_create")
-    if len(input_text) > 20_000 or len(uploaded_text) > 20_000:
-        raise FpaError("输入内容不能超过 2 万字符", 400, "task_create")
+    legacy_uploaded_file = (
+        UploadedRequirementFile(uploaded_name or "uploaded.md", uploaded_text.encode("utf-8")) if uploaded_text else None
+    )
+    normalized = normalize_requirement_input(input_text, uploaded_file or legacy_uploaded_file)
+    uploaded_normalized_text = normalized.uploaded_markdown or ""
     if target_person_days is not None and target_person_days <= 0:
         raise FpaError("目标人天必须大于 0", 400, "task_create")
     if count_timing not in COUNT_TIMINGS:
@@ -326,19 +323,22 @@ def create_task(
     if input_text:
         (paths.input_dir / "pasted_input.md").write_text(input_text, encoding="utf-8")
         register_file(db_path, data_dir, task_id, "input_pasted", paths.input_dir / "pasted_input.md", viewable=True)
-    if uploaded_text:
-        (paths.input_dir / "uploaded_input.md").write_text(uploaded_text, encoding="utf-8")
+    if uploaded_normalized_text:
+        (paths.input_dir / "uploaded_input.md").write_text(uploaded_normalized_text, encoding="utf-8")
         register_file(
             db_path,
             data_dir,
             task_id,
             "input_uploaded",
             paths.input_dir / "uploaded_input.md",
-            original_name=uploaded_name,
+            original_name=normalized.source_file_name,
             viewable=True,
         )
-    merged = "\n\n".join(part for part in [input_text, uploaded_text] if part)
-    (paths.input_dir / "merged_input.md").write_text(merged, encoding="utf-8")
+    (paths.input_dir / "merged_input.md").write_text(normalized.normalized_markdown, encoding="utf-8")
+    (paths.input_dir / "normalized_input.json").write_text(
+        json.dumps(normalized.to_json_dict(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     params = {
         "task_id": task_id,
         "system_code": system_code,
@@ -374,6 +374,7 @@ def create_task(
         )
         conn.commit()
     register_file(db_path, data_dir, task_id, "task_params", paths.input_dir / "task_params.json", viewable=True)
+    register_file(db_path, data_dir, task_id, "normalized_input", paths.input_dir / "normalized_input.json", admin_only=True)
     register_file(db_path, data_dir, task_id, "ai_request_package", paths.ai_dir / "AI请求包.json", admin_only=True)
     register_file(db_path, data_dir, task_id, "ai_request_summary", paths.ai_dir / "AI请求摘要.json", admin_only=True)
     write_task_event(db_path, task_id, "ai_request_created", "AI 请求包已生成")
@@ -545,6 +546,8 @@ def task_detail(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any
     paths = task_paths(data_dir, task_id)
     task_public = public_task(task)
     task_public["quality_flags"] = json.loads(task.get("quality_flags") or "[]")
+    normalized_input = read_normalized_input(paths)
+    task_public["parse_warnings"] = normalized_input.get("parse_warnings") or []
     process_path = paths.runtime_dir / "FPA生成过程.json"
     analysis_path = analysis_markdown_path(paths)
     excel_path = paths.output_dir / "FPA工作量评估.xlsx"
@@ -582,6 +585,14 @@ def task_detail(db_path: Path, data_dir: Path, task_id: str, user: dict[str, Any
 
 def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_normalized_input(paths: FpaPaths) -> dict[str, Any]:
+    path = paths.input_dir / "normalized_input.json"
+    if not path.exists():
+        return {"parse_warnings": []}
+    data = read_json(path)
+    return data if isinstance(data, dict) else {"parse_warnings": []}
 
 
 def read_task_params(paths: FpaPaths) -> dict[str, Any]:

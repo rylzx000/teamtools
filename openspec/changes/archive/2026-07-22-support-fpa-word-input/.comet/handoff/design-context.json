@@ -1,0 +1,16 @@
+{
+  "change": "support-fpa-word-input",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "e69963f034cb0d3e23e329a12f83c5520e47b3d0d2a12b77a6fbf4f6130c262d",
+  "files": [
+    { "path": "openspec/changes/support-fpa-word-input/proposal.md", "sha256": "48d3fc68214519c09fc955bcf24197e926c444f67e8f2909843d627f8e44de9f" },
+    { "path": "openspec/changes/support-fpa-word-input/design.md", "sha256": "ab318f45de83b688ffab2567040bdc89f6db9ff65cf4f729b11c390d5851caf0" },
+    { "path": "openspec/changes/support-fpa-word-input/tasks.md", "sha256": "f7aa507c11fe20e1a27bb4f4f7672421c19b14aaff2d8712bd67f12e85a41e80" },
+    { "path": "openspec/changes/support-fpa-word-input/specs/fpa-ai-contract/spec.md", "sha256": "75d400b54a088de28bf24e5c761622556e56c65c906971fc9d1d97f2ac313ffe" },
+    { "path": "openspec/changes/support-fpa-word-input/specs/fpa-interface-ui/spec.md", "sha256": "618d1230cc49546907df8fc47ac5051210834ba19d2b0834445a9bf666637b3a" },
+    { "path": "openspec/changes/support-fpa-word-input/specs/fpa-workflow/spec.md", "sha256": "c06de244e89472e1479f2c7bdde74a98f64e183d6742d3f96ad9e33bcb30ce48" }
+  ]
+}

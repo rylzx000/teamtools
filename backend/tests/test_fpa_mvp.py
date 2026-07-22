@@ -17,6 +17,11 @@ from openpyxl import load_workbook
 from app.config import get_config
 from app.db import hash_password, initialize_database, open_connection, utc_now
 from app.main import create_app
+from app.modules.fpa.input_normalizer import (
+    WORD_IMAGES_IGNORED_MESSAGE,
+    UploadedRequirementFile,
+    normalize_requirement_input,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +40,11 @@ VALID_ITEM = {
     "change_type": "新增",
     "remark": "EI 输入；中复用；新增提交能力",
 }
+MINIMAL_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?"
+    b"\x00\x05\xfe\x02\xfeA\xe2!\xbc\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 class AsgiClient:
@@ -45,15 +55,15 @@ class AsgiClient:
     def get(self, path: str):
         return self.request("GET", path)
 
-    def post(self, path: str, *, json=None, data=None):
-        return self.request("POST", path, json=json, data=data)
+    def post(self, path: str, *, json=None, data=None, files=None):
+        return self.request("POST", path, json=json, data=data, files=files)
 
-    def request(self, method: str, path: str, *, json=None, data=None):
+    def request(self, method: str, path: str, *, json=None, data=None, files=None):
         import asyncio
 
-        return asyncio.run(self._request(method, path, json=json, data=data))
+        return asyncio.run(self._request(method, path, json=json, data=data, files=files))
 
-    async def _request(self, method: str, path: str, *, json=None, data=None):
+    async def _request(self, method: str, path: str, *, json=None, data=None, files=None):
         import json as json_module
 
         parsed_url = urlsplit(path)
@@ -63,6 +73,9 @@ class AsgiClient:
         if json is not None:
             body = json_module.dumps(json, ensure_ascii=False).encode("utf-8")
             headers.append((b"content-type", b"application/json"))
+        elif files is not None:
+            body, content_type = build_multipart_body(data or {}, files)
+            headers.append((b"content-type", content_type.encode("utf-8")))
         elif data is not None:
             body = urlencode(data).encode("utf-8")
             headers.append((b"content-type", b"application/x-www-form-urlencoded"))
@@ -116,6 +129,34 @@ class AsgiClient:
         return response
 
 
+def build_multipart_body(data: dict[str, str], files: dict[str, tuple[str, bytes, str]]) -> tuple[bytes, str]:
+    boundary = "----teamtools-test-boundary"
+    chunks: list[bytes] = []
+    for name, value in data.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+                str(value).encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    for name, (filename, content, content_type) in files.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                (
+                    f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                    f"Content-Type: {content_type}\r\n\r\n"
+                ).encode("utf-8"),
+                content,
+                b"\r\n",
+            ]
+        )
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+
+
 class AsgiResponse:
     def __init__(self, status_code: int, headers: list[tuple[bytes, bytes]], content: bytes):
         self.status_code = status_code
@@ -156,6 +197,56 @@ class FpaMvpTest(unittest.TestCase):
                 frontend_dist_dir=tmp_path / "frontend" / "dist",
             )
         )
+
+    def build_docx_bytes(self, paragraphs: list[str] | None = None, table_rows: list[list[str]] | None = None) -> bytes:
+        from io import BytesIO
+
+        from docx import Document
+
+        document = Document()
+        for text in paragraphs or []:
+            document.add_paragraph(text)
+        if table_rows:
+            table = document.add_table(rows=len(table_rows), cols=max(len(row) for row in table_rows))
+            for row_index, row in enumerate(table_rows):
+                for col_index, value in enumerate(row):
+                    table.cell(row_index, col_index).text = value
+        buffer = BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
+
+    def build_docx_with_image_bytes(self, text: str = "") -> bytes:
+        from io import BytesIO
+
+        from docx import Document
+
+        document = Document()
+        if text:
+            document.add_paragraph(text)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "image.png"
+            image_path.write_bytes(MINIMAL_PNG)
+            document.add_picture(str(image_path))
+            buffer = BytesIO()
+            document.save(buffer)
+        return buffer.getvalue()
+
+    def build_docx_with_interleaved_table_bytes(self) -> bytes:
+        from io import BytesIO
+
+        from docx import Document
+
+        document = Document()
+        document.add_paragraph("段落 A：先描述业务背景")
+        table = document.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "字段"
+        table.cell(0, 1).text = "说明"
+        table.cell(1, 0).text = "影像补传"
+        table.cell(1, 1).text = "用户上传材料"
+        document.add_paragraph("段落 B：再描述后续通知")
+        buffer = BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
 
     def login(self, client: AsgiClient, username: str = "admin", password: str = "admin123") -> None:
         response = client.post("/api/auth/login", json={"username": username, "password": password})
@@ -203,6 +294,234 @@ class FpaMvpTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["config"]
+
+    def test_fpa_input_normalizer_accepts_markdown_upload(self) -> None:
+        uploaded = UploadedRequirementFile(
+            filename="需求.md",
+            content="新增理赔影像补传。".encode("utf-8"),
+        )
+
+        result = normalize_requirement_input("", uploaded)
+
+        self.assertEqual(result.source_file_name, "需求.md")
+        self.assertEqual(result.source_file_type, "md")
+        self.assertEqual(result.normalized_markdown, "新增理赔影像补传。")
+        self.assertEqual(result.text_length, len("新增理赔影像补传。"))
+        self.assertEqual(result.parse_warnings, [])
+
+    def test_fpa_input_normalizer_rejects_empty_markdown_upload(self) -> None:
+        uploaded = UploadedRequirementFile(filename="空.md", content=b"  \n")
+
+        with self.assertRaisesRegex(Exception, "未提取到有效文字|请粘贴需求文本或上传"):
+            normalize_requirement_input("", uploaded)
+
+    def test_fpa_input_normalizer_rejects_too_long_normalized_text(self) -> None:
+        uploaded = UploadedRequirementFile(filename="过长.md", content=("一" * 20001).encode("utf-8"))
+
+        with self.assertRaisesRegex(Exception, "2 万字符"):
+            normalize_requirement_input("", uploaded)
+
+    def test_fpa_input_normalizer_extracts_docx_paragraphs_and_table(self) -> None:
+        content = self.build_docx_bytes(
+            paragraphs=["需求标题", "1. 新增理赔材料上传", "2. 审核结果通知"],
+            table_rows=[["模块", "功能"], ["理赔", "影像补传"]],
+        )
+        uploaded = UploadedRequirementFile(filename="需求.docx", content=content)
+
+        result = normalize_requirement_input("", uploaded)
+
+        self.assertEqual(result.source_file_type, "docx")
+        self.assertIn("需求标题", result.normalized_markdown)
+        self.assertIn("新增理赔材料上传", result.normalized_markdown)
+        self.assertIn("审核结果通知", result.normalized_markdown)
+        self.assertIn("模块", result.normalized_markdown)
+        self.assertIn("影像补传", result.normalized_markdown)
+
+    def test_fpa_input_normalizer_preserves_docx_paragraph_table_order(self) -> None:
+        uploaded = UploadedRequirementFile(
+            filename="顺序.docx",
+            content=self.build_docx_with_interleaved_table_bytes(),
+        )
+
+        result = normalize_requirement_input("", uploaded)
+
+        paragraph_a_index = result.normalized_markdown.index("段落 A")
+        table_index = result.normalized_markdown.index("影像补传")
+        paragraph_b_index = result.normalized_markdown.index("段落 B")
+        self.assertLess(paragraph_a_index, table_index)
+        self.assertLess(table_index, paragraph_b_index)
+
+    def test_fpa_input_normalizer_warns_when_docx_contains_image(self) -> None:
+        uploaded = UploadedRequirementFile(filename="含图.docx", content=self.build_docx_with_image_bytes("新增影像材料上传"))
+
+        result = normalize_requirement_input("", uploaded)
+
+        self.assertIn("新增影像材料上传", result.normalized_markdown)
+        self.assertIn(
+            {"code": "word_images_ignored", "message": WORD_IMAGES_IGNORED_MESSAGE},
+            result.parse_warnings,
+        )
+
+    def test_fpa_input_normalizer_rejects_image_only_docx(self) -> None:
+        uploaded = UploadedRequirementFile(filename="仅图片.docx", content=self.build_docx_with_image_bytes())
+
+        with self.assertRaisesRegex(Exception, "未提取到有效文字"):
+            normalize_requirement_input("", uploaded)
+
+    def test_fpa_input_normalizer_rejects_unsupported_extensions_and_limits(self) -> None:
+        with self.assertRaisesRegex(Exception, "暂不支持 \\.doc"):
+            normalize_requirement_input("", UploadedRequirementFile(filename="旧格式.doc", content=b"abc"))
+        with self.assertRaisesRegex(Exception, "仅支持 Markdown \\.md 或 Word \\.docx"):
+            normalize_requirement_input("", UploadedRequirementFile(filename="需求.pdf", content=b"%PDF"))
+        with self.assertRaisesRegex(Exception, "Word \\.docx 文件不能超过 10MB"):
+            normalize_requirement_input("", UploadedRequirementFile(filename="过大.docx", content=b"x" * (10 * 1024 * 1024 + 1)))
+        with self.assertRaisesRegex(Exception, "Word 文档无法解析"):
+            normalize_requirement_input("", UploadedRequirementFile(filename="损坏.docx", content=b"not-a-docx"))
+
+    def test_fpa_task_create_accepts_markdown_file_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+
+            created = client.post(
+                "/api/fpa/tasks",
+                data={"system_code": "claimcar", "title": "Markdown 上传"},
+                files={"input_file": ("需求.md", "新增理赔影像补传。".encode("utf-8"), "text/markdown")},
+            )
+
+            self.assertEqual(created.status_code, 200, created.text)
+            task_id = created.json()["task"]["id"]
+            merged = (tmp_path / "data" / "tasks" / "fpa" / task_id / "input" / "merged_input.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("新增理赔影像补传", merged)
+
+    def test_fpa_task_create_accepts_docx_file_upload_and_persists_normalized_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+            content = self.build_docx_bytes(
+                paragraphs=["新增理赔材料上传"],
+                table_rows=[["模块", "功能"], ["理赔", "影像补传"]],
+            )
+
+            created = client.post(
+                "/api/fpa/tasks",
+                data={"system_code": "claimcar", "title": "Word 上传"},
+                files={
+                    "input_file": (
+                        "需求.docx",
+                        content,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+            )
+
+            self.assertEqual(created.status_code, 200, created.text)
+            task_id = created.json()["task"]["id"]
+            task_root = tmp_path / "data" / "tasks" / "fpa" / task_id
+            merged = (task_root / "input" / "merged_input.md").read_text(encoding="utf-8")
+            metadata = json.loads((task_root / "input" / "normalized_input.json").read_text(encoding="utf-8"))
+            self.assertIn("新增理赔材料上传", merged)
+            self.assertIn("影像补传", merged)
+            self.assertEqual(metadata["source_file_type"], "docx")
+            self.assertEqual(metadata["source_file_name"], "需求.docx")
+
+    def test_fpa_task_detail_exposes_docx_image_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+
+            created = client.post(
+                "/api/fpa/tasks",
+                data={"system_code": "claimcar", "title": "含图 Word"},
+                files={
+                    "input_file": (
+                        "含图.docx",
+                        self.build_docx_with_image_bytes("新增影像补传"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+            )
+
+            self.assertEqual(created.status_code, 200, created.text)
+            task_id = created.json()["task"]["id"]
+            detail = client.get(f"/api/fpa/tasks/{task_id}")
+            self.assertEqual(detail.status_code, 200, detail.text)
+            self.assertIn(
+                {"code": "word_images_ignored", "message": WORD_IMAGES_IGNORED_MESSAGE},
+                detail.json()["task"]["parse_warnings"],
+            )
+
+    def test_fpa_ai_request_package_uses_normalized_docx_text_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+            content = self.build_docx_bytes(paragraphs=["新增理赔资料上传"])
+
+            created = client.post(
+                "/api/fpa/tasks",
+                data={"system_code": "claimcar", "title": "AI 包验证"},
+                files={
+                    "input_file": (
+                        "需求.docx",
+                        content,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+            )
+
+            self.assertEqual(created.status_code, 200, created.text)
+            task_id = created.json()["task"]["id"]
+            ai_package_path = tmp_path / "data" / "tasks" / "fpa" / task_id / "ai" / "AI请求包.json"
+            ai_package = json.loads(ai_package_path.read_text(encoding="utf-8"))
+            raw = json.dumps(ai_package, ensure_ascii=False)
+            self.assertIn("新增理赔资料上传", raw)
+            self.assertNotIn("word/media", raw)
+            self.assertNotIn("需求.docx", raw)
+
+    def test_fpa_task_create_rejects_doc_pdf_image_and_broken_word_uploads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = self.make_client(Path(temp_dir))
+            self.login(client)
+            cases = [
+                ("旧格式.doc", b"abc", "暂不支持 .doc"),
+                ("需求.pdf", b"%PDF", "仅支持 Markdown .md 或 Word .docx"),
+                ("截图.png", MINIMAL_PNG, "仅支持 Markdown .md 或 Word .docx"),
+                ("损坏.docx", b"not-a-docx", "Word 文档无法解析"),
+            ]
+            for filename, content, message in cases:
+                response = client.post(
+                    "/api/fpa/tasks",
+                    data={"system_code": "claimcar", "title": filename},
+                    files={"input_file": (filename, content, "application/octet-stream")},
+                )
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertIn(message, response.text)
+
+    def test_fpa_task_create_rejects_oversized_uploads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = self.make_client(Path(temp_dir))
+            self.login(client)
+            oversized_md = client.post(
+                "/api/fpa/tasks",
+                data={"system_code": "claimcar", "title": "大 Markdown"},
+                files={"input_file": ("过大.md", b"x" * (256 * 1024 + 1), "text/markdown")},
+            )
+            self.assertEqual(oversized_md.status_code, 400, oversized_md.text)
+            self.assertIn("Markdown 文件不能超过 256KB", oversized_md.text)
+
+            oversized_docx = client.post(
+                "/api/fpa/tasks",
+                data={"system_code": "claimcar", "title": "大 Word"},
+                files={"input_file": ("过大.docx", b"x" * (10 * 1024 * 1024 + 1), "application/octet-stream")},
+            )
+            self.assertEqual(oversized_docx.status_code, 400, oversized_docx.text)
+            self.assertIn("Word .docx 文件不能超过 10MB", oversized_docx.text)
 
     def create_waiting_task(
         self,

@@ -1,0 +1,9 @@
+{
+  "openspec_proposal": "openspec/changes/support-fpa-word-input/proposal.md",
+  "openspec_design": "openspec/changes/support-fpa-word-input/design.md",
+  "openspec_tasks": "openspec/changes/support-fpa-word-input/tasks.md",
+  "openspec_delta_spec": "openspec/changes/support-fpa-word-input/specs/fpa-ai-contract/spec.md",
+  "handoff_context": "openspec/changes/support-fpa-word-input/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/support-fpa-word-input/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-22-support-fpa-word-input"
+}
