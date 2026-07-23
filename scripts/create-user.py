@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--role", choices=["admin", "user"], required=True, help="账号角色")
     parser.add_argument("--password", help="登录密码；不传时交互输入")
     parser.add_argument("--default-system-code", help="普通用户默认系统编码")
+    parser.add_argument("--initial-password-seed", help="管理员重置密码使用的初始化密码来源；不传时使用本次登录密码")
     parser.add_argument("--update", action="store_true", help="账号已存在时更新密码、角色和展示名")
     return parser.parse_args()
 
@@ -33,6 +34,7 @@ def main() -> int:
     if len(password) < 8:
         print("密码至少 8 位", file=sys.stderr)
         return 2
+    initial_password_seed = args.initial_password_seed or password
 
     config = get_config()
     initialize_database(config.db_path, seed_dev_users_enabled=False)
@@ -47,6 +49,7 @@ def main() -> int:
                 """
                 UPDATE users
                 SET display_name = ?, password_hash = ?, role = ?, default_system_code = ?,
+                    initial_password_seed = ?,
                     enabled = 1, updated_at = ?
                 WHERE username = ?
                 """,
@@ -55,6 +58,7 @@ def main() -> int:
                     hash_password(password),
                     args.role,
                     args.default_system_code,
+                    initial_password_seed,
                     now,
                     args.username,
                 ),
@@ -63,8 +67,8 @@ def main() -> int:
             conn.execute(
                 """
                 INSERT INTO users(id, username, display_name, password_hash, role,
-                                  default_system_code, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                                  default_system_code, initial_password_seed, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (
                     "user-" + secrets.token_hex(8),
@@ -73,6 +77,7 @@ def main() -> int:
                     hash_password(password),
                     args.role,
                     args.default_system_code,
+                    initial_password_seed,
                     now,
                     now,
                 ),

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_config
-from .db import fetch_one, initialize_database, open_connection, task_count, utc_now, verify_password
+from .db import fetch_one, hash_password, initialize_database, open_connection, task_count, utc_now, verify_password
 from .modules.fpa.input_normalizer import UploadedRequirementFile
 from .modules.fpa.service import (
     FpaError,
@@ -58,7 +58,7 @@ def create_app(
     initialize_database(app_db_path, seed_dev_users_enabled=config.seed_dev_users)
     ensure_resources(app_data_dir)
 
-    app = FastAPI(title="TeamTools", version="0.1.0")
+    app = FastAPI(title="FPA工作量评估", version="0.1.0")
     app.state.data_dir = app_data_dir
     app.state.db_path = app_db_path
     app.state.frontend_dist_dir = app_frontend_dist
@@ -144,6 +144,27 @@ def create_app(
     async def me(request: Request) -> dict[str, Any]:
         return {"user": public_user(require_user(request))}
 
+    @app.post("/api/auth/change-password")
+    async def change_password(request: Request) -> dict[str, bool]:
+        user = require_user(request)
+        payload = await read_payload(request)
+        current_password = str(payload.get("current_password") or "")
+        new_password = str(payload.get("new_password") or "")
+        if not current_password:
+            raise FpaError("当前密码不能为空", 400, "auth")
+        if len(new_password) < 6 or not new_password.strip():
+            raise FpaError("新密码至少 6 位且不能全为空格", 400, "auth")
+        with open_connection(app_db_path) as conn:
+            current = fetch_one(conn, "SELECT * FROM users WHERE id = ? AND enabled = 1", (user["id"],))
+            if not current or not verify_password(current_password, current["password_hash"]):
+                raise FpaError("当前密码错误", 400, "auth")
+            conn.execute(
+                "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+                (hash_password(new_password), utc_now(), user["id"]),
+            )
+            conn.commit()
+        return {"ok": True}
+
     @app.get("/api/admin/model-key/config")
     async def admin_model_key_config(request: Request) -> dict[str, Any]:
         require_admin(request)
@@ -184,6 +205,23 @@ def create_app(
         user = require_admin(request)
         return {"quota": reset_user_quota(app_db_path, user_id, user)}
 
+    @app.post("/api/admin/users/{user_id}/reset-password")
+    async def admin_reset_user_password(request: Request, user_id: str) -> dict[str, bool]:
+        require_admin(request)
+        with open_connection(app_db_path) as conn:
+            target = fetch_one(conn, "SELECT * FROM users WHERE id = ? AND enabled = 1", (user_id,))
+            if not target:
+                raise FpaError("用户不存在", 404, "permission")
+            seed = str(target.get("initial_password_seed") or "")
+            if not seed:
+                raise FpaError("该用户缺少初始化密码，无法重置", 400, "auth")
+            conn.execute(
+                "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+                (hash_password(seed), utc_now(), user_id),
+            )
+            conn.commit()
+        return {"ok": True}
+
     @app.get("/api/fpa/systems")
     async def fpa_systems(request: Request) -> dict[str, Any]:
         require_user(request)
@@ -191,8 +229,7 @@ def create_app(
 
     @app.get("/api/fpa/form-config")
     async def fpa_form_config(request: Request) -> dict[str, Any]:
-        require_user(request)
-        return get_form_config(app_data_dir)
+        return get_form_config(app_data_dir, require_user(request))
 
     @app.post("/api/fpa/tasks")
     async def fpa_create_task(request: Request) -> dict[str, Any]:
@@ -277,9 +314,9 @@ def create_app(
             """
             <!doctype html>
             <html lang="zh-CN">
-              <head><meta charset="UTF-8" /><title>TeamTools</title></head>
+              <head><meta charset="UTF-8" /><title>FPA工作量评估</title></head>
               <body style="font-family: Arial, sans-serif; padding: 24px;">
-                <h1>TeamTools</h1>
+                <h1>FPA工作量评估</h1>
                 <p>前端静态文件尚未构建。请先运行 scripts/build-frontend.ps1。</p>
               </body>
             </html>

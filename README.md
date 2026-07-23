@@ -65,7 +65,7 @@ docker compose up -d
 创建管理员账号：
 
 ```bash
-docker compose exec teamtools python scripts/create-user.py --username admin --display-name 管理员 --role admin
+docker compose exec teamtools python scripts/create-user.py --username renyi --display-name 任毅 --role admin
 ```
 
 更多步骤见 `docs/deployment/02-服务器部署.md`。

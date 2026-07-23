@@ -161,6 +161,7 @@ def import_rows(rows: list[UserRow], *, update_existing: bool) -> tuple[int, int
                     """
                     UPDATE users
                     SET display_name = ?, password_hash = ?, role = ?, default_system_code = ?,
+                        initial_password_seed = ?,
                         enabled = 1, updated_at = ?
                     WHERE username = ?
                     """,
@@ -169,6 +170,7 @@ def import_rows(rows: list[UserRow], *, update_existing: bool) -> tuple[int, int
                         hash_password(row.password),
                         row.role,
                         row.default_system_code,
+                        row.password,
                         now,
                         row.username,
                     ),
@@ -178,8 +180,8 @@ def import_rows(rows: list[UserRow], *, update_existing: bool) -> tuple[int, int
                 conn.execute(
                     """
                     INSERT INTO users(id, username, display_name, password_hash, role,
-                                      default_system_code, enabled, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                                      default_system_code, initial_password_seed, enabled, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                     """,
                     (
                         "user-" + secrets.token_hex(8),
@@ -188,6 +190,7 @@ def import_rows(rows: list[UserRow], *, update_existing: bool) -> tuple[int, int
                         hash_password(row.password),
                         row.role,
                         row.default_system_code,
+                        row.password,
                         now,
                         now,
                     ),

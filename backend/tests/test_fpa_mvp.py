@@ -261,15 +261,30 @@ class FpaMvpTest(unittest.TestCase):
         display_name: str,
         password: str = "pass123",
         role: str = "user",
+        default_system_code: str | None = None,
+        initial_password_seed: str | None = None,
     ) -> None:
         now = utc_now()
         with open_connection(db_path) as conn:
             conn.execute(
                 """
-                INSERT INTO users(id, username, display_name, password_hash, role, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                INSERT INTO users(
+                    id, username, display_name, password_hash, role,
+                    default_system_code, initial_password_seed, enabled, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
-                (user_id, username, display_name, hash_password(password), role, now, now),
+                (
+                    user_id,
+                    username,
+                    display_name,
+                    hash_password(password),
+                    role,
+                    default_system_code,
+                    initial_password_seed,
+                    now,
+                    now,
+                ),
             )
             conn.commit()
 
@@ -608,6 +623,9 @@ class FpaMvpTest(unittest.TestCase):
             self.assertIn("count_timings", payload)
             self.assertIn("integrity_levels", payload)
             self.assertIn("defaults", payload)
+            system_codes = [item["code"] for item in payload["systems"]]
+            self.assertEqual(system_codes, ["claimcar", "claimoth"])
+            self.assertIsNone(payload["defaults"]["system_code"])
             self.assertEqual(payload["defaults"]["count_timing"], "估算中期")
             self.assertEqual(
                 payload["defaults"]["integrity_level"],
@@ -621,6 +639,36 @@ class FpaMvpTest(unittest.TestCase):
             dumped = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn("knowledge_dir", dumped)
             self.assertNotIn(str(tmp_path / "data"), dumped)
+
+    def test_form_config_returns_valid_user_default_system(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            db_path = tmp_path / "teamtools-test.db"
+            client = self.make_client(tmp_path)
+            with open_connection(db_path) as conn:
+                conn.execute("UPDATE users SET default_system_code = ? WHERE username = ?", ("claimoth", "demo"))
+                conn.commit()
+            self.login(client, "demo", "demo123")
+
+            response = client.get("/api/fpa/form-config")
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["defaults"]["system_code"], "claimoth")
+
+    def test_form_config_ignores_unavailable_default_system(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            db_path = tmp_path / "teamtools-test.db"
+            client = self.make_client(tmp_path)
+            with open_connection(db_path) as conn:
+                conn.execute("UPDATE users SET default_system_code = ? WHERE username = ?", ("onlineclaim", "demo"))
+                conn.commit()
+            self.login(client, "demo", "demo123")
+
+            response = client.get("/api/fpa/form-config")
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIsNone(response.json()["defaults"]["system_code"])
 
     def test_fpa_task_list_paginates_defaults_limits_and_sorts_newest_first(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -749,12 +797,12 @@ class FpaMvpTest(unittest.TestCase):
             self.assertEqual(systems.status_code, 200)
             self.assertEqual(
                 [item["code"] for item in systems.json()["items"]],
-                ["claimcar", "claimoth", "onlineclaim", "clqp"],
+                ["claimcar", "claimoth"],
             )
 
             task_id = self.create_waiting_task(
                 client,
-                system_code="onlineclaim",
+                system_code="claimcar",
                 count_timing="估算中期",
                 integrity_level="完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式",
             )
@@ -779,6 +827,12 @@ class FpaMvpTest(unittest.TestCase):
             self.assertIn("target_person_days", ai_package["plain_prompt"])
 
             raw_response = self.valid_raw_response()
+            raw_content = raw_response["choices"][0]["message"]["content"]
+            raw_response["choices"][0]["message"]["content"] = (
+                raw_content.replace('"system_code": "onlineclaim"', '"system_code": "claimcar"')
+                .replace('"system_name": "在线理赔服务平台"', '"system_name": "车险理赔核心系统"')
+                .replace('"system": "在线理赔服务平台"', '"system": "车险理赔核心系统"')
+            )
             raw_response["apiKey"] = "sk-test-secret"
             result = client.post(
                 f"/api/fpa/tasks/{task_id}/ai-result",
@@ -1201,7 +1255,7 @@ class FpaMvpTest(unittest.TestCase):
             tmp_path = Path(temp_dir)
             client = self.make_client(tmp_path)
             self.login(client)
-            task_id = self.create_waiting_task(client, system_code="onlineclaim", title="错误系统口径")
+            task_id = self.create_waiting_task(client, system_code="claimoth", title="错误系统口径")
             structured = self.valid_structured_json()
             structured["assessment_context"]["system_code"] = "claimcar"
             structured["assessment_context"]["system_name"] = "车险理赔核心系统"
@@ -1232,7 +1286,7 @@ class FpaMvpTest(unittest.TestCase):
                 data={
                     "system_code": "claimcar",
                     "title": "明显选错系统",
-                    "input_text": "在线理赔服务平台需要优化 App 视频会话、影像补传、任务状态查询和用户通知。",
+                    "input_text": "claimoth claimoth claimoth policy payment status update.",
                 },
             )
             self.assertEqual(created.status_code, 200, created.text)
@@ -1242,7 +1296,7 @@ class FpaMvpTest(unittest.TestCase):
             self.assertEqual(first.status_code, 200, first.text)
             relevance = first.json()["system_relevance"]
             self.assertIn(relevance["status"], {"warning", "blocked"})
-            self.assertEqual(relevance["best_match_system_code"], "onlineclaim")
+            self.assertEqual(relevance["best_match_system_code"], "claimoth")
 
             confirmed = client.post(f"/api/fpa/tasks/{task_id}/system-relevance/confirm")
             self.assertEqual(confirmed.status_code, 200, confirmed.text)
@@ -1250,15 +1304,42 @@ class FpaMvpTest(unittest.TestCase):
             self.assertEqual(second.status_code, 200, second.text)
             self.assertTrue(second.json()["system_relevance"]["confirmed"])
 
-    def test_system_relevance_allows_missing_knowledge_system(self) -> None:
+    def test_system_relevance_does_not_surface_hidden_systems(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             client = self.make_client(Path(temp_dir))
             self.login(client)
-            task_id = self.create_waiting_task(client, system_code="clqp", title="无资料系统")
+            created = client.post(
+                "/api/fpa/tasks",
+                data={
+                    "system_code": "claimcar",
+                    "title": "隐藏系统文本",
+                    "input_text": "在线理赔服务平台需要优化 App 视频会话、影像补传、任务状态查询和用户通知。",
+                },
+            )
+            self.assertEqual(created.status_code, 200, created.text)
+            task_id = created.json()["task"]["id"]
 
-            request = client.get(f"/api/fpa/tasks/{task_id}/ai-request")
-            self.assertEqual(request.status_code, 200, request.text)
-            self.assertIn(request.json()["system_relevance"]["status"], {"pass", "warning"})
+            response = client.get(f"/api/fpa/tasks/{task_id}/ai-request")
+
+            self.assertEqual(response.status_code, 200, response.text)
+            relevance = response.json()["system_relevance"]
+            self.assertNotIn(relevance["best_match_system_code"], {"onlineclaim", "clqp"})
+            self.assertNotIn("在线理赔服务平台", relevance["message"])
+
+    def test_fpa_task_create_rejects_hidden_system(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = self.make_client(Path(temp_dir))
+            self.login(client)
+            hidden = client.post(
+                "/api/fpa/tasks",
+                data={
+                    "system_code": "clqp",
+                    "title": "隐藏系统",
+                    "input_text": "验证隐藏系统不能从提交入口创建任务。",
+                },
+            )
+            self.assertEqual(hidden.status_code, 400, hidden.text)
+            self.assertEqual(hidden.json()["detail"], "系统编码不存在")
 
     def test_dev_users_seed_only_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1282,10 +1363,97 @@ class FpaMvpTest(unittest.TestCase):
 
             response = client.post("/api/auth/login", json={"username": "demo", "password": "demo123"})
             self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual(response.json()["user"]["default_system_code"], "onlineclaim")
+            self.assertIsNone(response.json()["user"]["default_system_code"])
             me = client.get("/api/auth/me")
             self.assertEqual(me.status_code, 200, me.text)
-            self.assertEqual(me.json()["user"]["default_system_code"], "onlineclaim")
+            self.assertIsNone(me.json()["user"]["default_system_code"])
+
+    def test_change_password_requires_current_password_and_valid_new_password(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client, "demo", "demo123")
+
+            wrong_current = client.post(
+                "/api/auth/change-password",
+                json={"current_password": "wrong-password", "new_password": "newpass1"},
+            )
+            self.assertEqual(wrong_current.status_code, 400, wrong_current.text)
+
+            too_short = client.post(
+                "/api/auth/change-password",
+                json={"current_password": "demo123", "new_password": "12345"},
+            )
+            self.assertEqual(too_short.status_code, 400, too_short.text)
+
+            blank = client.post(
+                "/api/auth/change-password",
+                json={"current_password": "demo123", "new_password": "      "},
+            )
+            self.assertEqual(blank.status_code, 400, blank.text)
+
+    def test_change_password_replaces_login_password_and_keeps_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client, "demo", "demo123")
+
+            changed = client.post(
+                "/api/auth/change-password",
+                json={"current_password": "demo123", "new_password": "newpass1"},
+            )
+            self.assertEqual(changed.status_code, 200, changed.text)
+            self.assertTrue(changed.json()["ok"])
+            self.assertEqual(client.get("/api/auth/me").status_code, 200)
+
+            client.post("/api/auth/logout")
+            old_login = client.post("/api/auth/login", json={"username": "demo", "password": "demo123"})
+            self.assertEqual(old_login.status_code, 401, old_login.text)
+
+            new_login = client.post("/api/auth/login", json={"username": "demo", "password": "newpass1"})
+            self.assertEqual(new_login.status_code, 200, new_login.text)
+
+    def test_admin_can_reset_user_password_to_initial_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            db_path = tmp_path / "teamtools-test.db"
+            client = self.make_client(tmp_path)
+            self.add_user(
+                db_path,
+                user_id="user-reset",
+                username="resetuser",
+                display_name="重置用户",
+                password="changed1",
+                initial_password_seed="13900000000",
+            )
+            self.login(client, "admin", "admin123")
+
+            response = client.post("/api/admin/users/user-reset/reset-password")
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertTrue(response.json()["ok"])
+            self.assertNotIn("13900000000", json.dumps(response.json(), ensure_ascii=False))
+
+            client.post("/api/auth/logout")
+            reset_login = client.post("/api/auth/login", json={"username": "resetuser", "password": "13900000000"})
+            self.assertEqual(reset_login.status_code, 200, reset_login.text)
+
+    def test_reset_password_requires_admin_and_initial_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            db_path = tmp_path / "teamtools-test.db"
+            client = self.make_client(tmp_path)
+            self.add_user(db_path, user_id="user-no-seed", username="noseed", display_name="无种子", password="oldpass1")
+
+            self.login(client, "demo", "demo123")
+            forbidden = client.post("/api/admin/users/user-no-seed/reset-password")
+            self.assertEqual(forbidden.status_code, 403, forbidden.text)
+
+            client.post("/api/auth/logout")
+            self.login(client, "admin", "admin123")
+            missing_seed = client.post("/api/admin/users/user-no-seed/reset-password")
+            self.assertEqual(missing_seed.status_code, 400, missing_seed.text)
+            self.assertEqual(missing_seed.json()["detail"], "该用户缺少初始化密码，无法重置")
 
     def test_database_migrates_missing_default_system_column(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1371,7 +1539,7 @@ class FpaMvpTest(unittest.TestCase):
             tmp_path = Path(temp_dir)
             client = self.make_client(tmp_path)
             self.login(client, "demo", "demo123")
-            task_id = self.create_waiting_task(client, system_code="onlineclaim", title="领取公用 Key")
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="领取公用 Key")
 
             disabled = client.post(f"/api/fpa/tasks/{task_id}/shared-model-key", json={})
             self.assertEqual(disabled.status_code, 409)
@@ -1429,7 +1597,7 @@ class FpaMvpTest(unittest.TestCase):
             client.post("/api/auth/logout")
             self.login(client, "demo", "demo123")
 
-            shared_task_id = self.create_waiting_task(client, system_code="onlineclaim", title="公用 Key 成功扣减")
+            shared_task_id = self.create_waiting_task(client, system_code="claimcar", title="公用 Key 成功扣减")
             issued = client.post(f"/api/fpa/tasks/{shared_task_id}/shared-model-key", json={})
             ticket = issued.json()["ticket"]
             result = client.post(
@@ -1440,7 +1608,7 @@ class FpaMvpTest(unittest.TestCase):
                     "model": "deepseek-v4-flash",
                     "model_call_source": "shared_key",
                     "model_call_ticket": ticket,
-                    "structured_json": self.structured_for_system(system_code="onlineclaim", system_name="在线理赔服务平台"),
+                    "structured_json": self.structured_for_system(system_code="claimcar", system_name="车险理赔核心系统"),
                 },
             )
             self.assertEqual(result.status_code, 200, result.text)
@@ -1456,7 +1624,7 @@ class FpaMvpTest(unittest.TestCase):
             detail_after_repeat = client.get(f"/api/fpa/tasks/{shared_task_id}")
             self.assertEqual(detail_after_repeat.json()["model_quota"]["used_count"], 1)
 
-            personal_task_id = self.create_waiting_task(client, system_code="onlineclaim", title="个人 Key 不扣减")
+            personal_task_id = self.create_waiting_task(client, system_code="claimoth", title="个人 Key 不扣减")
             personal = client.post(
                 f"/api/fpa/tasks/{personal_task_id}/ai-result",
                 json={
@@ -1464,7 +1632,7 @@ class FpaMvpTest(unittest.TestCase):
                     "provider": "deepseek",
                     "model": "deepseek-v4-flash",
                     "model_call_source": "personal_key",
-                    "structured_json": self.structured_for_system(system_code="onlineclaim", system_name="在线理赔服务平台"),
+                    "structured_json": self.structured_for_system(system_code="claimoth", system_name="非车险理赔核心系统"),
                 },
             )
             self.assertEqual(personal.status_code, 200, personal.text)
@@ -1487,7 +1655,7 @@ class FpaMvpTest(unittest.TestCase):
             client.post("/api/auth/logout")
             self.login(client, "demo", "demo123")
 
-            call_failed_task = self.create_waiting_task(client, system_code="onlineclaim", title="模型调用失败不扣减")
+            call_failed_task = self.create_waiting_task(client, system_code="claimcar", title="模型调用失败不扣减")
             call_failed_ticket = client.post(f"/api/fpa/tasks/{call_failed_task}/shared-model-key", json={}).json()["ticket"]
             failed = client.post(
                 f"/api/fpa/tasks/{call_failed_task}/ai-result",
@@ -1503,9 +1671,9 @@ class FpaMvpTest(unittest.TestCase):
             self.assertEqual(detail.json()["model_quota"]["used_count"], 0)
             self.assertNotIn("sk-should-redact", detail.text)
 
-            validation_failed_task = self.create_waiting_task(client, system_code="onlineclaim", title="校验失败不扣减")
+            validation_failed_task = self.create_waiting_task(client, system_code="claimoth", title="校验失败不扣减")
             validation_ticket = client.post(f"/api/fpa/tasks/{validation_failed_task}/shared-model-key", json={}).json()["ticket"]
-            invalid_structured = self.structured_for_system(system_code="onlineclaim", system_name="在线理赔服务平台")
+            invalid_structured = self.structured_for_system(system_code="claimoth", system_name="非车险理赔核心系统")
             invalid_structured["frozen_items"][0]["category"] = "BAD"
             invalid = client.post(
                 f"/api/fpa/tasks/{validation_failed_task}/ai-result",

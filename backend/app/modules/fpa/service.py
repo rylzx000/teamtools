@@ -88,6 +88,7 @@ SYSTEMS = [
     {"code": "onlineclaim", "name": "在线理赔服务平台", "sort_order": 30, "knowledge_dir": "onlineclaim"},
     {"code": "clqp", "name": "零配件报价系统", "sort_order": 40, "knowledge_dir": "clqp"},
 ]
+PUBLIC_SYSTEM_CODES = {"claimcar", "claimoth"}
 
 
 @dataclass(frozen=True)
@@ -168,10 +169,7 @@ target_person_days：{{ target_person_days }}
 
 
 def load_systems(data_dir: Path) -> list[dict[str, Any]]:
-    ensure_resources(data_dir)
-    systems_yaml = data_dir / "config" / "modules" / "fpa" / "systems.yaml"
-    payload = yaml.safe_load(systems_yaml.read_text(encoding="utf-8")) or {}
-    systems = payload.get("systems") or SYSTEMS
+    systems = public_system_entries(data_dir)
     return sorted(
         [
             {
@@ -186,12 +184,20 @@ def load_systems(data_dir: Path) -> list[dict[str, Any]]:
     )
 
 
+def public_system_entries(data_dir: Path) -> list[dict[str, Any]]:
+    return [item for item in system_entries(data_dir) if str(item.get("code") or "") in PUBLIC_SYSTEM_CODES]
+
+
 def select_option(value: str, coefficient: float) -> dict[str, Any]:
     return {"value": value, "label": f"{coefficient:.2f} {value}", "coefficient": coefficient}
 
 
-def get_form_config(data_dir: Path) -> dict[str, Any]:
+def get_form_config(data_dir: Path, user: dict[str, Any] | None = None) -> dict[str, Any]:
     systems = load_systems(data_dir)
+    system_codes = {item["code"] for item in systems}
+    default_system = str(user.get("default_system_code") or "") if user else ""
+    if default_system not in system_codes:
+        default_system = ""
     return {
         "systems": systems,
         "count_timings": [select_option(value, coefficient) for value, coefficient in COUNT_TIMINGS.items()],
@@ -204,7 +210,7 @@ def get_form_config(data_dir: Path) -> dict[str, Any]:
             )
         ],
         "defaults": {
-            "system_code": systems[0]["code"] if systems else None,
+            "system_code": default_system or None,
             "count_timing": DEFAULT_COUNT_TIMING,
             "integrity_level": DEFAULT_INTEGRITY_LEVEL,
         },
@@ -212,6 +218,8 @@ def get_form_config(data_dir: Path) -> dict[str, Any]:
 
 
 def system_by_code(data_dir: Path, code: str) -> dict[str, Any]:
+    if str(code or "") not in PUBLIC_SYSTEM_CODES:
+        raise FpaError("系统编码不存在", 400, "task_create")
     ensure_resources(data_dir)
     systems_yaml = data_dir / "config" / "modules" / "fpa" / "systems.yaml"
     payload = yaml.safe_load(systems_yaml.read_text(encoding="utf-8")) or {}
@@ -660,7 +668,7 @@ def build_system_relevance(data_dir: Path, task_id: str, task: dict[str, Any]) -
     input_text = input_path.read_text(encoding="utf-8") if input_path.exists() else ""
 
     scored: list[dict[str, Any]] = []
-    for system in system_entries(data_dir):
+    for system in public_system_entries(data_dir):
         tokens = relevance_tokens(system_relevance_text(data_dir, system))
         score = score_system_relevance(input_text, system, tokens)
         scored.append({"system": system, "score": score})
@@ -964,7 +972,7 @@ def generate_result_files(
     frozen_items = structured["frozen_items"]
     payload = {
         "requirement_name": task["title"],
-        "assessor": "TeamTools",
+        "assessor": "FPA工作量评估",
         "assessment_date": utc_now()[:10],
         "count_mode": "估算功能点",
         "target_work_days": None if target_days is None else float(target_days),

@@ -150,6 +150,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
   const [lastRefresh, setLastRefresh] = useState('刚刚');
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
 
   useEffect(() => {
     api('/api/auth/me')
@@ -195,9 +196,25 @@ export default function App() {
   }
 
   return (
-    <Shell user={user} path={path} navigate={navigate} logout={logout} notice={notice} lastRefresh={lastRefresh}>
-      <Router path={path} user={user} navigate={navigate} setNotice={setNotice} setLastRefresh={setLastRefresh} />
-    </Shell>
+    <>
+      <Shell
+        user={user}
+        path={path}
+        navigate={navigate}
+        logout={logout}
+        notice={notice}
+        lastRefresh={lastRefresh}
+        onChangePassword={() => setShowPasswordDialog(true)}
+      >
+        <Router path={path} user={user} navigate={navigate} setNotice={setNotice} setLastRefresh={setLastRefresh} />
+      </Shell>
+      {showPasswordDialog && (
+        <ChangePasswordDialog
+          onClose={() => setShowPasswordDialog(false)}
+          setNotice={setNotice}
+        />
+      )}
+    </>
   );
 }
 
@@ -218,7 +235,7 @@ function Router({
     return <TasksPage user={user} navigate={navigate} setNotice={setNotice} setLastRefresh={setLastRefresh} />;
   }
   if (path === '/fpa/submit') {
-    return <SubmitPage user={user} navigate={navigate} setNotice={setNotice} />;
+    return <SubmitPage navigate={navigate} setNotice={setNotice} />;
   }
   if (path === '/fpa/detail') {
     return <LatestDetailPage navigate={navigate} setNotice={setNotice} />;
@@ -243,8 +260,8 @@ function Router({
 }
 
 function LoginPage({ onLogin, navigate }: { onLogin: (user: User) => void; navigate: (path: string) => void }) {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   async function submit(event: FormEvent) {
@@ -266,10 +283,7 @@ function LoginPage({ onLogin, navigate }: { onLogin: (user: User) => void; navig
   return (
     <main className="login-page">
       <form className="login-card" onSubmit={submit}>
-        <span className="brand-mark">TT</span>
-        <p className="eyebrow">TEAMTOOLS</p>
-        <h1>登录 TeamTools</h1>
-        <p className="subtle">开发账号：admin/admin123，普通用户 demo/demo123。上线前请替换密码。</p>
+        <h1>FPA工作量评估</h1>
         <label className="field">
           <span>账号</span>
           <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
@@ -292,6 +306,7 @@ function Shell({
   logout,
   notice,
   lastRefresh,
+  onChangePassword,
   children,
 }: {
   user: User;
@@ -300,9 +315,11 @@ function Shell({
   logout: () => void;
   notice: string;
   lastRefresh: string;
+  onChangePassword: () => void;
   children: React.ReactNode;
 }) {
   const isDetailTab = path.includes('/fpa/tasks/') || path === '/fpa/detail';
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div className="app-shell">
       <main className="main-shell">
@@ -313,9 +330,34 @@ function Shell({
           </div>
           <div className="topbar-user">
             <span className="topbar-refresh">最近刷新：<strong>{lastRefresh}</strong></span>
-            <span>{user.display_name}</span>
-            <span className="role-pill">{user.role === 'admin' ? '管理员' : '普通用户'}</span>
-            <button className="text-button" type="button" onClick={logout}>退出登录</button>
+            <div className="user-menu">
+              <button className="user-menu-trigger" type="button" onClick={() => setMenuOpen((value) => !value)}>
+                <span>{user.display_name || user.username}</span>
+                <span className="role-pill">{user.role === 'admin' ? '管理员' : '普通用户'}</span>
+              </button>
+              {menuOpen && (
+                <div className="user-menu-panel">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onChangePassword();
+                    }}
+                  >
+                    修改密码
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      logout();
+                    }}
+                  >
+                    退出登录
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -330,6 +372,73 @@ function Shell({
           {children}
         </section>
       </main>
+    </div>
+  );
+}
+
+function ChangePasswordDialog({ onClose, setNotice }: { onClose: () => void; setNotice: (value: string) => void }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError('');
+    if (!currentPassword) {
+      setError('当前密码不能为空');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError('新密码至少 6 位');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('新密码和确认新密码必须一致');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      });
+      setNotice('密码已修改');
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '密码修改失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <form className="dialog-card" onSubmit={submit}>
+        <div className="panel-heading">
+          <h2>修改密码</h2>
+          <button className="text-button" type="button" onClick={onClose}>关闭</button>
+        </div>
+        <label className="field">
+          <span>当前密码</span>
+          <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" />
+        </label>
+        <label className="field">
+          <span>新密码</span>
+          <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" />
+        </label>
+        <label className="field">
+          <span>确认新密码</span>
+          <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+        </label>
+        {error && <div className="form-alert is-error">{error}</div>}
+        <div className="dialog-actions">
+          <button className="button" type="button" onClick={onClose}>取消</button>
+          <button className="button primary" type="submit" disabled={saving}>{saving ? '保存中...' : '确认修改'}</button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -605,7 +714,7 @@ function LatestDetailPage({ navigate, setNotice }: { navigate: (path: string) =>
   );
 }
 
-function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path: string) => void; setNotice: (value: string) => void }) {
+function SubmitPage({ navigate, setNotice }: { navigate: (path: string) => void; setNotice: (value: string) => void }) {
   const [systems, setSystems] = useState<SystemItem[]>([]);
   const [systemCode, setSystemCode] = useState('');
   const [title, setTitle] = useState('');
@@ -637,13 +746,12 @@ function SubmitPage({ user, navigate, setNotice }: { user: User; navigate: (path
         setIntegrityLevelOptions(data.integrity_levels);
         setCountTiming(data.defaults.count_timing);
         setIntegrityLevel(data.defaults.integrity_level);
-        const preferred = data.systems.some((item) => item.code === user.default_system_code)
-          ? user.default_system_code
-          : data.defaults.system_code || data.systems[0]?.code || '';
-        setSystemCode(preferred || '');
+        const defaultSystem = data.defaults.system_code || '';
+        const preferred = data.systems.some((item) => item.code === defaultSystem) ? defaultSystem : '';
+        setSystemCode(preferred);
       })
       .catch((err) => setError(err instanceof Error ? err.message : '表单配置加载失败'));
-  }, [user.default_system_code]);
+  }, []);
 
   const targetDaysError = targetDays.trim() && !/^\d+(\.\d)?$/.test(targetDays.trim()) ? '目标人天最多保留 1 位小数' : '';
 
@@ -916,6 +1024,12 @@ function ModelConfigPage({ setNotice }: { setNotice: (value: string) => void }) 
     setNotice('用户用量已重置');
   }
 
+  async function resetPassword(row: ModelQuotaRow) {
+    if (!window.confirm(`确认将 ${row.display_name} 的密码重置为初始化密码？`)) return;
+    await api(`/api/admin/users/${row.user_id}/reset-password`, { method: 'POST' });
+    setNotice('密码已重置为初始化密码');
+  }
+
   async function bulkSet() {
     await api('/api/admin/model-key/quotas/bulk-set', {
       method: 'POST',
@@ -998,6 +1112,7 @@ function ModelConfigPage({ setNotice }: { setNotice: (value: string) => void }) 
                     <td className="row-actions">
                       <button className="mini-button" type="button" onClick={() => saveQuota(row)}>保存</button>
                       <button className="mini-button" type="button" onClick={() => resetQuota(row)}>重置</button>
+                      <button className="mini-button" type="button" onClick={() => resetPassword(row)}>重置密码</button>
                     </td>
                   </tr>
                 ))}

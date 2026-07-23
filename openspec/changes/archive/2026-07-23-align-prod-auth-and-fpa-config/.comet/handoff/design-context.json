@@ -1,0 +1,17 @@
+{
+  "change": "align-prod-auth-and-fpa-config",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "7ca63d90cd83f25806f691103f77c243a7e1e23859740856f28427f1f31cfa05",
+  "files": [
+    { "path": "openspec/changes/align-prod-auth-and-fpa-config/proposal.md", "sha256": "bd9be92f418675bf8046e43fc11f86f0a54327fc513716261b52b2d5f6497107" },
+    { "path": "openspec/changes/align-prod-auth-and-fpa-config/design.md", "sha256": "56382e5d323ac7039edf92a024367782c002916e56774aedfc84f9db18303e28" },
+    { "path": "openspec/changes/align-prod-auth-and-fpa-config/tasks.md", "sha256": "477af188bc110284e64383ff4ee5dc8e263b6a06867d09933ed31ae897d160c8" },
+    { "path": "openspec/changes/align-prod-auth-and-fpa-config/specs/account-password-management/spec.md", "sha256": "da9b703794ae501f44cdc2172413aac633af6e26873358655898374a1f94d496" },
+    { "path": "openspec/changes/align-prod-auth-and-fpa-config/specs/fpa-interface-ui/spec.md", "sha256": "16939188197dbfb0f001e7771d0c7803e4cb06881ac675c65083e886c252eb93" },
+    { "path": "openspec/changes/align-prod-auth-and-fpa-config/specs/fpa-workflow/spec.md", "sha256": "952a0c7e9891c2e894d8c3f94a358696a6f73521c0f29b7e928c8f07b116786e" },
+    { "path": "openspec/changes/align-prod-auth-and-fpa-config/specs/platform-architecture/spec.md", "sha256": "d5f7343d56f75c55ef024a468fd30f7ef841bc96193b207c4d4c63b3a965c501" }
+  ]
+}

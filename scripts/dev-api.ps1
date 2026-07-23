@@ -5,7 +5,9 @@ Set-Location (Join-Path $root 'backend')
 $dataRoot = Join-Path $root 'data'
 $env:TEAMTOOLS_DATA_DIR = $dataRoot
 $env:TEAMTOOLS_DB_PATH = Join-Path $dataRoot 'teamtools.db'
-$env:TEAMTOOLS_SEED_DEV_USERS = 'true'
+if (-not $env:TEAMTOOLS_SEED_DEV_USERS) {
+  $env:TEAMTOOLS_SEED_DEV_USERS = 'false'
+}
 
 uv run uvicorn app.main:app `
   --reload `

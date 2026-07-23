@@ -1,0 +1,9 @@
+{
+  "openspec_proposal": "openspec/changes/align-prod-auth-and-fpa-config/proposal.md",
+  "openspec_design": "openspec/changes/align-prod-auth-and-fpa-config/design.md",
+  "openspec_tasks": "openspec/changes/align-prod-auth-and-fpa-config/tasks.md",
+  "openspec_delta_spec": "openspec/changes/align-prod-auth-and-fpa-config/specs/account-password-management/spec.md",
+  "handoff_context": "openspec/changes/align-prod-auth-and-fpa-config/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/align-prod-auth-and-fpa-config/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-23-align-prod-auth-and-fpa-config"
+}
