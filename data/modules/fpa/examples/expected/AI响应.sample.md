@@ -195,14 +195,17 @@
       "category": "EI",
       "reuse": "中",
       "change_type": "新增",
-      "remark": "外部用户提交并维护补传记录，按 EI；基于现有理赔流程扩展，复用中；新增资料提交能力。",
+      "remark": "外部用户提交并维护补传记录，按 EI；基于现有理赔流程扩展，复用中；新增资料提交能力；关联数据：维护FP-002影像补传记录ILF。",
       "fact_ids": [
         "F-001"
       ],
       "route_ids": [
         "R-001"
       ],
-      "system_scene_ids": []
+      "system_scene_ids": [],
+      "linked_data_ids": [
+        "FP-002"
+      ]
     },
     {
       "stable_id": "FP-002",
@@ -216,14 +219,17 @@
       "category": "ILF",
       "reuse": "中",
       "change_type": "新增",
-      "remark": "由本系统维护的逻辑数据组，按 ILF；依托既有案件资料能力，复用中；新增补传记录。",
+      "remark": "由本系统维护的逻辑数据组，按 ILF；依托既有案件资料能力，复用中；新增补传记录；关联过程：见FP-001影像补传提交EI。",
       "fact_ids": [
         "F-001"
       ],
       "route_ids": [
         "R-002"
       ],
-      "system_scene_ids": []
+      "system_scene_ids": [],
+      "linked_process_ids": [
+        "FP-001"
+      ]
     },
     {
       "stable_id": "FP-003",
@@ -237,14 +243,17 @@
       "category": "EO",
       "reuse": "中",
       "change_type": "新增",
-      "remark": "通知包含审核结论等派生信息，按 EO；复用现有消息能力，复用中；新增通知场景。",
+      "remark": "通知包含审核结论等派生信息，按 EO；复用现有消息能力，复用中；新增通知场景；关联数据：引用FP-002影像补传记录ILF。",
       "fact_ids": [
         "F-002"
       ],
       "route_ids": [
         "R-003"
       ],
-      "system_scene_ids": []
+      "system_scene_ids": [],
+      "linked_data_ids": [
+        "FP-002"
+      ]
     },
     {
       "stable_id": "FP-004",
@@ -258,14 +267,17 @@
       "category": "EQ",
       "reuse": "中",
       "change_type": "新增",
-      "remark": "读取并展示补传记录，不含复杂派生计算，按 EQ；复用既有案件资料页，复用中；新增查询内容。",
+      "remark": "读取并展示补传记录，不含复杂派生计算，按 EQ；复用既有案件资料页，复用中；新增查询内容；关联数据：查询FP-002影像补传记录ILF。",
       "fact_ids": [
         "F-003"
       ],
       "route_ids": [
         "R-004"
       ],
-      "system_scene_ids": []
+      "system_scene_ids": [],
+      "linked_data_ids": [
+        "FP-002"
+      ]
     }
   ],
   "review_notes": [

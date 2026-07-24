@@ -429,6 +429,22 @@
               "minLength": 1
             },
             "default": []
+          },
+          "linked_process_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^FP-[0-9]{3}$"
+            },
+            "default": []
+          },
+          "linked_data_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^FP-[0-9]{3}$"
+            },
+            "default": []
           }
         }
       }

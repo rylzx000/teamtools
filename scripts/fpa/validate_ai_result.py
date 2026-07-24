@@ -139,6 +139,51 @@ def ensure_refs(values: Any, existing: set[str], field: str, id_key: str) -> lis
     return normalized
 
 
+def ensure_optional_refs(values: Any, existing: set[str], field: str, id_key: str) -> list[str]:
+    refs = ensure_list(values, field)
+    normalized: list[str] = []
+    for index, value in enumerate(refs, start=1):
+        ref = ensure_nonempty_string(value, f"{field}[{index}]")
+        ensure_id_format(ref, id_key, f"{field}[{index}]")
+        if ref not in existing:
+            raise ValidationError(f"{field} 存在悬空引用: {ref}")
+        normalized.append(ref)
+    return normalized
+
+
+UNLINKED_DATA_FUNCTION_REASON_KEYWORDS = (
+    "既有",
+    "资料不足",
+    "资料缺口",
+    "缺口",
+    "复核",
+    "无法明确",
+    "未明确",
+    "不硬补",
+    "支撑过程未",
+    "本次未单独计数",
+)
+
+
+def has_unlinked_data_function_reason(text: str) -> bool:
+    return any(keyword in text for keyword in UNLINKED_DATA_FUNCTION_REASON_KEYWORDS)
+
+
+def review_notes_has_bound_data_function_reason(review_notes: Any, stable_id: str, count_item_name: str) -> bool:
+    if not isinstance(review_notes, list):
+        return False
+    item_keys = [value for value in (stable_id, count_item_name.strip()) if value]
+    if not item_keys:
+        return False
+    for note in review_notes:
+        if not isinstance(note, dict):
+            continue
+        note_text = f"{note.get('code') or ''} {note.get('message') or ''}"
+        if any(item_key in note_text for item_key in item_keys) and has_unlinked_data_function_reason(note_text):
+            return True
+    return False
+
+
 def validate_assessment_context(value: Any) -> dict[str, Any]:
     context = ensure_dict(value, "assessment_context")
     required = {
@@ -282,6 +327,7 @@ def validate_frozen_items(
     context: dict[str, Any],
     result_stable_ids: set[str],
     expected_system_name: str | None = None,
+    review_notes: Any = None,
 ) -> list[dict[str, Any]]:
     items = [ensure_dict(item, f"frozen_items[{index}]") for index, item in enumerate(ensure_list(value, "frozen_items", nonempty=True), start=1)]
     allowed = {
@@ -300,8 +346,12 @@ def validate_frozen_items(
         "fact_ids",
         "route_ids",
         "system_scene_ids",
+        "linked_process_ids",
+        "linked_data_ids",
     }
-    required = allowed - {"system_scene_ids"}
+    required = allowed - {"system_scene_ids", "linked_process_ids", "linked_data_ids"}
+    stable_ids = ensure_unique(items, "stable_id", "frozen_items")
+    category_by_id: dict[str, str] = {}
     for index, item in enumerate(items, start=1):
         field = f"frozen_items[{index}]"
         reject_extra_fields(item, allowed, field)
@@ -322,6 +372,7 @@ def validate_frozen_items(
             ensure_string(item.get(key), f"{field}.{key}")
         if item.get("category") not in CATEGORIES:
             raise ValidationError(f"{field}.category 枚举值非法: {item.get('category')}")
+        category_by_id[stable_id] = str(item.get("category"))
         if item.get("reuse") not in REUSE_VALUES:
             raise ValidationError(f"{field}.reuse 枚举值非法: {item.get('reuse')}")
         if item.get("change_type") not in CHANGE_TYPES:
@@ -333,7 +384,41 @@ def validate_frozen_items(
             raise ValidationError(f"{field}.system_scene_ids 缺失: 命中系统 08 字典时冻结条目必须包含系统场景编号")
         for scene_index, scene_id in enumerate(scene_ids, start=1):
             ensure_nonempty_string(scene_id, f"{field}.system_scene_ids[{scene_index}]")
-    ensure_unique(items, "stable_id", "frozen_items")
+
+    for index, item in enumerate(items, start=1):
+        field = f"frozen_items[{index}]"
+        category = str(item.get("category"))
+        linked_process_ids = ensure_optional_refs(
+            item.get("linked_process_ids", []),
+            stable_ids,
+            f"{field}.linked_process_ids",
+            "stable_id",
+        )
+        linked_data_ids = ensure_optional_refs(
+            item.get("linked_data_ids", []),
+            stable_ids,
+            f"{field}.linked_data_ids",
+            "stable_id",
+        )
+        if category in {"ILF", "EIF"}:
+            for ref in linked_process_ids:
+                if category_by_id.get(ref) not in {"EI", "EO", "EQ"}:
+                    raise ValidationError(f"{field}.linked_process_ids 必须引用事务功能 EI/EO/EQ: {ref}")
+            remark_has_reason = has_unlinked_data_function_reason(str(item.get("remark") or ""))
+            note_has_bound_reason = review_notes_has_bound_data_function_reason(
+                review_notes,
+                str(item.get("stable_id") or ""),
+                str(item.get("count_item_name") or ""),
+            )
+            if not linked_process_ids and not (remark_has_reason or note_has_bound_reason):
+                raise ValidationError(
+                    f"{field}.linked_process_ids 缺失: ILF/EIF 必须关联支撑过程，或在 remark 说明既有过程、资料不足、列入复核、无法明确支撑过程、不硬补事务功能；"
+                    "若使用 review_notes 说明，必须包含该冻结项 stable_id 或 count_item_name"
+                )
+        if category in {"EI", "EO", "EQ"}:
+            for ref in linked_data_ids:
+                if category_by_id.get(ref) not in {"ILF", "EIF"}:
+                    raise ValidationError(f"{field}.linked_data_ids 必须引用数据功能 ILF/EIF: {ref}")
     return items
 
 
@@ -392,11 +477,19 @@ def validate_result(
             f"assessment_context.system_name 与当前任务系统不一致: {context.get('system_name')} != {expected_system_name}"
         )
     validate_project_features(result.get("project_features", {}))
+    validate_review_notes(result.get("review_notes"))
     _, fact_ids = validate_change_facts(result.get("change_facts"))
     _, route_ids = validate_routing_decisions(result.get("routing_decisions"), fact_ids)
     _, result_stable_ids = validate_split_merge_decisions(result.get("split_merge_decisions"), route_ids)
-    validate_frozen_items(result.get("frozen_items"), fact_ids, route_ids, context, result_stable_ids, expected_system_name)
-    validate_review_notes(result.get("review_notes"))
+    validate_frozen_items(
+        result.get("frozen_items"),
+        fact_ids,
+        route_ids,
+        context,
+        result_stable_ids,
+        expected_system_name,
+        result.get("review_notes"),
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

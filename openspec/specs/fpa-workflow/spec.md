@@ -90,13 +90,13 @@
 
 ### Requirement: FPA 主处理链路
 
-系统 SHALL 按“提交评估 -> 生成 AI 请求包 -> 等待AI调用 -> 前端选择个人 Key 或公用 Key 调用模型 -> 回传 AI 响应 -> 提取 AI评估.md 和结构化 JSON -> 校验事实/路由/冻结清单 -> 生成 Excel -> 成功任务按需扣减公用额度 -> 下载结果”的流程处理任务，并把 AI 业务判断与脚本确定性生成分离。普通用户可见结果只包含摘要和 Excel 下载；`AI评估.md`、结构化 JSON 和过程 JSON 作为管理员复核或后台排查产物。
+系统 SHALL 按“提交评估 -> 生成 AI 请求包 -> 等待AI调用 -> 前端选择个人 Key 或公用 Key 调用模型 -> 回传 AI 响应 -> 提取 AI评估.md 和结构化 JSON -> 校验事实/路由/冻结清单 -> 生成 Excel -> 成功任务按需扣减公用额度 -> 下载结果”的流程处理任务，并把 AI 业务判断与脚本确定性生成分离。普通用户可见结果只包含摘要和 Excel 下载；`AI评估.md`、结构化 JSON、Excel payload 和过程 JSON 作为管理员复核或后台排查产物。`AI`、`Key`、`Excel` 和 `payload` 保留英文，是既有能力、模型调用凭据概念、办公软件名称和机器可读数据结构专有名词。
 
 #### Scenario: 成功完成任务
 - **WHEN** 前端回传合法 AI 响应
 - **THEN** 后端提取并保存 `AI评估.md` 和 `AI结构化结果.json`
 - **AND** 后端校验 JSON 中的变更事实、场景路由、拆分/合并决策和冻结功能点清单
-- **AND** 后端基于同一组冻结清单生成 Excel 脚本输入 payload、`FPA生成过程.json` 和 `FPA工作量评估.xlsx`
+- **AND** 后端基于同一组 `frozen_items` 生成 Excel 脚本输入 payload、`FPA生成过程.json` 和 `FPA工作量评估.xlsx`
 - **AND** 任务完成后用户可以查看摘要并下载 Excel
 
 #### Scenario: 个人 Key 调用成功
@@ -132,6 +132,7 @@
 #### Scenario: 冻结清单与产物一致
 - **WHEN** 任务生成正式结果
 - **THEN** `AI评估.md`、Excel 明细和过程 JSON 中的功能点数量、顺序、类型和 `stable_id` 必须保持一致
+- **AND** 过程 JSON 必须保留冻结项中的 `fact_ids`、`route_ids`、`system_scene_ids`、`linked_process_ids` 和 `linked_data_ids`
 - **AND** 任一产物生成失败时不得进入 `completed`
 - **AND** 公用额度扣减只能发生在正式结果进入 `completed` 之后
 
@@ -156,17 +157,17 @@
 
 ### Requirement: 成功结果可见性
 
-系统 SHALL 在成功任务中向普通用户展示结果摘要并提供 Excel 下载入口；`AI分析.md` / `AI评估.md`、AI 结构化结果、生成过程 JSON 和其他排查产物 SHALL 仅作为管理员复核或后台排查用途保留。
+系统 SHALL 在成功任务中向普通用户展示结果摘要并提供 Excel 下载入口；`AI评估.md`、AI 结构化结果、Excel payload、生成过程 JSON 和其他排查产物 SHALL 仅作为管理员复核或后台排查用途保留。
 
 #### Scenario: 普通用户查看成功任务
 - **WHEN** 普通用户打开自己已完成的任务详情
 - **THEN** 页面展示结果摘要、目标命中、质量提示摘要和 Excel 下载入口
 - **AND** 只有 Excel 提供普通用户下载入口
-- **AND** 页面和接口不得向普通用户展示或返回 `AI分析.md`、`AI评估.md`、完整过程 JSON、结构化 JSON、payload、服务器绝对路径、内部文件角色、原始模型错误、环境变量或模型 Key
+- **AND** 页面和接口不得向普通用户展示或返回 `AI评估.md`、完整过程 JSON、结构化 JSON、payload、服务器绝对路径、内部文件角色、原始模型错误、环境变量或模型 Key
 
 #### Scenario: 管理员查看任务
 - **WHEN** 管理员查看任意 FPA 任务
-- **THEN** 系统可以展示提交人、失败阶段、事件时间线、`AI分析.md` / `AI评估.md`、AI 请求摘要、AI 结构化结果、生成过程 JSON 和排查摘要
+- **THEN** 系统可以展示提交人、失败阶段、事件时间线、`AI评估.md`、AI 请求摘要、AI 结构化结果、Excel payload、生成过程 JSON 和排查摘要
 - **AND** 不得暴露模型 Key、环境变量或其他敏感内容
 
 ### Requirement: FPA 产物保存
@@ -176,7 +177,8 @@
 #### Scenario: 保存 AI 评估说明
 - **WHEN** AI 结构化结果通过校验且冻结清单可用
 - **THEN** 后端保存 AI 响应中的 `AI评估.md`
-- **AND** `AI评估.md` 必须说明同一组冻结清单的功能点摘要、拆分依据、关键假设、目标校准和待复核点
+- **AND** `AI评估.md` 必须说明需求理解、资料使用情况、变更事实摘要、场景路由摘要、拆分/合并摘要、冻结功能点清单摘要、数据功能关联表、目标人天校准说明和待复核点
+- **AND** 如果系统资料提供关键链路、后段链路或核心链路复核表，`AI评估.md` 必须逐项说明是否涉及、是否单独计数、对应 `stable_id`、合并或不计原因
 - **AND** 文件内容必须引用同一组 `stable_id`，不得与 Excel 明细另行生成不同清单
 
 #### Scenario: 保存排查文件

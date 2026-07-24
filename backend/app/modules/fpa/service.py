@@ -147,18 +147,25 @@ target_person_days：{{ target_person_days }}
             json.dumps(
                 {
                     "type": "object",
-                    "required": ["items"],
+                    "required": [
+                        "schema_version",
+                        "requirement_name",
+                        "assessment_context",
+                        "change_facts",
+                        "routing_decisions",
+                        "split_merge_decisions",
+                        "frozen_items",
+                    ],
                     "properties": {
+                        "schema_version": {"const": "fpa.ai_contract.v2"},
                         "requirement_name": {"type": "string"},
                         "assessment_context": {"type": "object"},
                         "project_features": {"type": "object"},
-                        "analysis_notes": {"type": "string"},
-                        "uncertainties": {"type": "array"},
-                        "items": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": {"type": "object"},
-                        },
+                        "change_facts": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+                        "routing_decisions": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+                        "split_merge_decisions": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+                        "frozen_items": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+                        "review_notes": {"type": "array", "items": {"type": "object"}},
                     },
                 },
                 ensure_ascii=False,

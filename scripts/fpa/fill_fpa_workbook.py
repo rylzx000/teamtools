@@ -242,7 +242,7 @@ def normalize_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
         for key in ITEM_COLUMN_MAP:
             value = raw.get(key, "")
             item[key] = "" if value is None else str(value).strip()
-        for trace_key in ("stable_id", "fact_ids", "route_ids", "system_scene_ids"):
+        for trace_key in ("stable_id", "fact_ids", "route_ids", "system_scene_ids", "linked_process_ids", "linked_data_ids"):
             if trace_key in raw:
                 item[trace_key] = raw[trace_key]
         for required in ["system", "level1_module", "function_description", "count_item_name"]:
@@ -572,36 +572,6 @@ def build_quality_warnings(
     target_work_days: float | None,
 ) -> tuple[list[dict[str, str]], dict[str, Any], bool]:
     warnings: list[dict[str, str]] = []
-    categories = Counter(item["category"] for item in items)
-    item_count = len(items)
-
-    if item_count < 3:
-        warnings.append(
-            {
-                "code": "ITEM_COUNT_TOO_LOW",
-                "level": "high",
-                "message": "功能点条目数过少，存在过度合并或漏拆风险。",
-                "suggestion": "复核数据组、输入、输出、查询和接口类基本过程是否完整拆分。",
-            }
-        )
-    if categories.get("ILF", 0) == 0:
-        warnings.append(
-            {
-                "code": "NO_ILF",
-                "level": "medium",
-                "message": "明细中缺少 ILF，可能遗漏业务数据组或状态记录。",
-                "suggestion": "复核是否存在需要维护或长期保存的数据组。",
-            }
-        )
-    if categories.get("EO", 0) == 0:
-        warnings.append(
-            {
-                "code": "NO_EO",
-                "level": "medium",
-                "message": "明细中缺少 EO，可能遗漏派生输出、通知、报表或风险提示。",
-                "suggestion": "复核是否存在计算后输出、导出、推送或提示类功能。",
-            }
-        )
     if target_work_days is not None and estimates["target_check"]["hit_status"] == "out_of_range":
         warnings.append(
             {

@@ -949,6 +949,80 @@ class FpaMvpTest(unittest.TestCase):
                 self.assertEqual(size[f"D{row}"].value, expected["level2_module"])
                 self.assertEqual(size[f"H{row}"].value, expected["count_item_name"])
 
+    def test_linked_fields_are_preserved_to_payload_and_process_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="追溯字段保留")
+            structured = self.structured_for_system()
+            structured["frozen_items"][0]["linked_data_ids"] = ["FP-002"]
+            structured["frozen_items"][0]["remark"] += "；关联数据：维护FP-002影像补传记录ILF。"
+            structured["frozen_items"][1]["linked_process_ids"] = ["FP-001"]
+            structured["frozen_items"][1]["remark"] += "；关联过程：见FP-001影像补传提交EI。"
+            structured["frozen_items"][2]["linked_data_ids"] = ["FP-002"]
+            structured["frozen_items"][2]["remark"] += "；关联数据：引用FP-002影像补传记录ILF。"
+            structured["frozen_items"][3]["linked_data_ids"] = ["FP-002"]
+            structured["frozen_items"][3]["remark"] += "；关联数据：查询FP-002影像补传记录ILF。"
+
+            result = client.post(
+                f"/api/fpa/tasks/{task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "structured_json": structured,
+                },
+            )
+
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["task"]["status"], "completed")
+            task_root = tmp_path / "data" / "tasks" / "fpa" / task_id
+            excel_payload = json.loads((task_root / "runtime" / "Excel脚本输入payload.json").read_text(encoding="utf-8"))
+            process = json.loads((task_root / "runtime" / "FPA生成过程.json").read_text(encoding="utf-8"))
+            self.assertEqual(excel_payload["items"][0]["linked_data_ids"], ["FP-002"])
+            self.assertEqual(excel_payload["items"][1]["linked_process_ids"], ["FP-001"])
+            self.assertEqual(process["items"][0]["linked_data_ids"], ["FP-002"])
+            self.assertEqual(process["items"][1]["linked_process_ids"], ["FP-001"])
+            workbook = load_workbook(task_root / "output" / "FPA工作量评估.xlsx", data_only=False)
+            size = workbook["规模估算"]
+            self.assertNotIn("FP-002", [size[f"O{row}"].value for row in range(6, 10)])
+
+    def test_excel_generation_quality_gate_does_not_fail_for_small_transaction_only_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            client = self.make_client(tmp_path)
+            self.login(client)
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="小清单不阻断")
+            structured = self.structured_for_system()
+            structured["change_facts"] = [structured["change_facts"][0]]
+            structured["routing_decisions"] = [structured["routing_decisions"][0]]
+            structured["split_merge_decisions"] = [structured["split_merge_decisions"][0]]
+            structured["frozen_items"] = [structured["frozen_items"][0]]
+            structured["frozen_items"][0].pop("linked_data_ids", None)
+            structured["frozen_items"][0]["remark"] = "外部用户提交并维护补传记录，按 EI；基于现有理赔流程扩展，复用中；新增资料提交能力。"
+            structured["review_notes"] = []
+
+            result = client.post(
+                f"/api/fpa/tasks/{task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "structured_json": structured,
+                },
+            )
+
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["task"]["status"], "completed")
+            process = json.loads(
+                (tmp_path / "data" / "tasks" / "fpa" / task_id / "runtime" / "FPA生成过程.json").read_text(encoding="utf-8")
+            )
+            self.assertNotEqual(process["quality_gate"]["status"], "failed")
+            self.assertNotIn("ITEM_COUNT_TOO_LOW", process["quality_gate"]["reason_codes"])
+            self.assertNotIn("NO_ILF", process["quality_gate"]["reason_codes"])
+            self.assertNotIn("NO_EO", process["quality_gate"]["reason_codes"])
+
     def test_target_person_days_does_not_change_frozen_items(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             tmp_path = Path(temp_dir)
@@ -1219,6 +1293,142 @@ class FpaMvpTest(unittest.TestCase):
             self.assertFalse((tmp_path / "data" / "tasks" / "fpa" / task_id / "output" / "FPA工作量评估.xlsx").exists())
             detail = client.get(f"/api/fpa/tasks/{task_id}")
             self.assertEqual(detail.json()["task"]["failure_stage"], "json_validation")
+
+    def test_ai_result_rejects_data_function_without_link_or_review_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = self.make_client(Path(temp_dir))
+            self.login(client)
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="孤立数据功能")
+            structured = self.structured_for_system()
+            structured["review_notes"] = [
+                {
+                    "code": "DATA_FUNCTION_REVIEW",
+                    "message": "资料不足，列入复核，暂不硬补事务功能。",
+                    "severity": "medium",
+                }
+            ]
+            structured["frozen_items"][1].pop("linked_process_ids", None)
+            structured["frozen_items"][1]["remark"] = "由本系统维护的逻辑数据组，按 ILF；复用中；新增补传记录。"
+
+            result = client.post(
+                f"/api/fpa/tasks/{task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "structured_json": structured,
+                },
+            )
+
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["task"]["status"], "failed")
+            detail = client.get(f"/api/fpa/tasks/{task_id}")
+            self.assertEqual(detail.json()["task"]["failure_stage"], "json_validation")
+            self.assertIn("linked_process_ids", detail.json()["task"]["error_summary"])
+
+    def test_ai_result_accepts_data_function_with_bound_review_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = self.make_client(Path(temp_dir))
+            self.login(client)
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="绑定复核说明")
+            structured = self.structured_for_system()
+            structured["review_notes"] = [
+                {
+                    "code": "DATA_FUNCTION_REVIEW",
+                    "message": "FP-002 影像补传记录资料不足，无法明确支撑过程，列入复核，不硬补事务功能。",
+                    "severity": "medium",
+                }
+            ]
+            structured["frozen_items"][1].pop("linked_process_ids", None)
+            structured["frozen_items"][1]["remark"] = "由本系统维护的逻辑数据组，按 ILF；复用中；新增补传记录。"
+
+            result = client.post(
+                f"/api/fpa/tasks/{task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "structured_json": structured,
+                },
+            )
+
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["task"]["status"], "completed")
+
+    def test_ai_result_rejects_eif_linked_process_ids_to_missing_stable_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = self.make_client(Path(temp_dir))
+            self.login(client)
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="EIF悬空引用")
+            structured = self.structured_for_system()
+            structured["frozen_items"][1]["category"] = "EIF"
+            structured["frozen_items"][1]["linked_process_ids"] = ["FP-999"]
+            structured["frozen_items"][1]["remark"] += "；关联过程：见FP-999外部保单校验EI。"
+
+            result = client.post(
+                f"/api/fpa/tasks/{task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "structured_json": structured,
+                },
+            )
+
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["task"]["status"], "failed")
+            detail = client.get(f"/api/fpa/tasks/{task_id}")
+            self.assertEqual(detail.json()["task"]["failure_stage"], "json_validation")
+            self.assertIn("悬空引用", detail.json()["task"]["error_summary"])
+
+    def test_ai_result_rejects_transaction_linked_data_ids_to_missing_stable_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = self.make_client(Path(temp_dir))
+            self.login(client)
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="事务悬空数据")
+            structured = self.structured_for_system()
+            structured["frozen_items"][0]["linked_data_ids"] = ["FP-999"]
+            structured["frozen_items"][0]["remark"] += "；关联数据：维护FP-999不存在数据功能。"
+
+            result = client.post(
+                f"/api/fpa/tasks/{task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "structured_json": structured,
+                },
+            )
+
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["task"]["status"], "failed")
+            detail = client.get(f"/api/fpa/tasks/{task_id}")
+            self.assertEqual(detail.json()["task"]["failure_stage"], "json_validation")
+            self.assertIn("悬空引用", detail.json()["task"]["error_summary"])
+
+    def test_ai_result_rejects_dictionary_item_without_system_scene_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = self.make_client(Path(temp_dir))
+            self.login(client)
+            task_id = self.create_waiting_task(client, system_code="claimcar", title="字典缺少场景编号")
+            structured = self.structured_for_system(has_dictionary=True)
+            structured["frozen_items"][0]["system_scene_ids"] = []
+
+            result = client.post(
+                f"/api/fpa/tasks/{task_id}/ai-result",
+                json={
+                    "success": True,
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "structured_json": structured,
+                },
+            )
+
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["task"]["status"], "failed")
+            detail = client.get(f"/api/fpa/tasks/{task_id}")
+            self.assertEqual(detail.json()["task"]["failure_stage"], "json_validation")
+            self.assertIn("system_scene_ids", detail.json()["task"]["error_summary"])
 
     def test_ai_result_rejects_system_code_and_backend_output_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
