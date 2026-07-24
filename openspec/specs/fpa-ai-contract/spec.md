@@ -57,7 +57,7 @@
 
 ### Requirement: AI 输出只包含业务判断
 
-系统 SHALL 约束 AI 结构化 JSON 只输出需求名称建议、评估上下文、项目特征参考、变更事实、场景路由、拆分/合并决策、冻结功能点清单和复核提示。冻结功能点清单 SHALL 是 `AI评估.md`、Excel payload 和过程 JSON 的唯一明细依据；系统不得恢复旧 `items` 顶层契约。`AI`、`JSON`、`Excel` 和 `payload` 保留英文，是既有能力、数据格式、办公软件名称和机器可读数据结构专有名词。
+系统 SHALL 约束 AI 结构化 JSON 只输出需求名称建议、评估上下文、项目特征参考、变更事实、场景路由、拆分/合并决策、冻结功能点清单和复核提示。冻结功能点清单 SHALL 是 `AI评估.md`、Excel payload 和过程 JSON 的唯一明细依据；系统不得恢复旧 `items` 顶层契约。`AI`、`JSON`、`Excel` 保留英文，是既有能力、数据格式和办公软件名称专有名词。
 
 #### Scenario: 合法 AI 冻结清单
 - **WHEN** AI 输出 `frozen_items`
@@ -111,41 +111,15 @@
 
 系统 SHALL 使用管理员维护的精简知识包作为 AI 请求包资料来源，并按蒸馏规则保留系统定位、边界、核心模块、业务链路、数据责任、外部接口、系统场景字典和 FPA 判断辅助信息。
 
-#### Scenario: 有资料模式
-- **WHEN** 已选系统配置了知识包目录且 `teamtools-system-brief.md` 可读
-- **THEN** 请求包使用该精简知识包作为系统背景
-- **AND** MVP 不读取 `source/` 下完整资料、不做动态片段检索
-
 #### Scenario: 08 场景拆分字典可用
 - **WHEN** 已选系统资料包包含 `08-FPA场景拆分字典.md`
 - **THEN** 请求包必须把该文件作为关键上下文提供给 AI
 - **AND** 提示词要求 AI 优先匹配系统场景编号
 - **AND** 命中系统字典时，冻结清单、Excel payload 和过程 JSON 中的 `Excel一级模块`、`Excel二级模块` 和 `功能点计数项名称` 必须原样使用系统字典值
 
-#### Scenario: 08 场景拆分字典缺失
-- **WHEN** 已选系统资料包缺少 `08-FPA场景拆分字典.md`
-- **THEN** 任务允许进入无系统字典模式继续生成
-- **AND** `AI评估.md` 和结构化 JSON 必须记录资料缺口、临时归类依据和待复核点
-
-#### Scenario: 资料过长或证据不足
-- **WHEN** 知识包超过长度上限或资料存在缺口
-- **THEN** 系统记录配置错误或在请求包中标记资料缺口
-- **AND** 不得静默截断造成事实缺失
-
 ### Requirement: AI 结果系统绑定与编号格式
 
 系统 MUST 以当前任务选择的系统作为 AI 结构化结果的权威系统边界。`assessment_context.system_code` 必须等于当前任务系统编码，`assessment_context.system_name` 必须等于当前任务系统中文名，且 `frozen_items[].system` 必须等于当前任务系统中文名。系统 MUST 对所有追溯编号及引用编号执行格式强校验：`change_facts[].fact_id` 匹配 `^F-[0-9]{3}$`，`routing_decisions[].route_id` 匹配 `^R-[0-9]{3}$`，`split_merge_decisions[].decision_id` 匹配 `^D-[0-9]{3}$`，`frozen_items[].stable_id` 匹配 `^FP-[0-9]{3}$`；`routing_decisions[].fact_ids[]`、`split_merge_decisions[].route_ids[]`、`split_merge_decisions[].result_stable_ids[]`、`frozen_items[].fact_ids[]`、`frozen_items[].route_ids[]`、`frozen_items[].linked_process_ids[]` 和 `frozen_items[].linked_data_ids[]` 也必须符合对应格式。
-
-#### Scenario: AI 返回其他已知系统
-- **WHEN** 当前任务选择系统为 A，但 AI 结构化结果返回系统 B
-- **THEN** 后端校验失败
-- **AND** 即使系统 B 是已知系统也不得通过
-- **AND** 后端不得生成 Excel
-
-#### Scenario: 编号引用一致但格式非法
-- **WHEN** AI 结构化结果中的事实、路由、决策或冻结项编号引用关系完整，但编号格式不是规定格式
-- **THEN** 后端校验失败
-- **AND** 后端不得生成 Excel
 
 #### Scenario: 数据功能缺少支撑过程说明
 - **WHEN** `frozen_items[]` 中 `category` 为 `ILF` 或 `EIF`，且 `linked_process_ids` 为空或缺失

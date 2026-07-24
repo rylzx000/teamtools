@@ -24,29 +24,11 @@
 - **AND** 脚本 payload 不作为普通用户可见或可下载产物
 - **AND** `items` 只是冻结功能点清单进入脚本的字段名转换，必须保留 `stable_id`、`fact_ids`、`route_ids`、`system_scene_ids`、`linked_process_ids` 和 `linked_data_ids`，不得代表重新生成、重新排序或重新判断功能点
 
-#### Scenario: 项目特征默认值
-- **WHEN** 后端生成 Excel 脚本 payload
-- **THEN** `规模计数时机` 默认使用 `估算中期`，对应系数 `1.21`
-- **AND** `完整性级别` 默认使用 `完整性级别为A/B同时为达成完整性级别要求采取了特殊的设计及实现方式`，对应系数 `1.10`
-- **AND** 其他项目特征使用模板默认值，除非后续 change 明确开放给用户选择
-
 #### Scenario: 脚本生成过程 JSON
 - **WHEN** Excel 脚本运行成功
 - **THEN** 脚本输出 `FPA生成过程.json`
 - **AND** 过程 JSON 包含标准化明细、`stable_id`、`fact_ids`、`route_ids`、`system_scene_ids`、`linked_process_ids`、`linked_data_ids`、计算结果、目标命中、结构提醒、校验门禁和脱敏输出摘要
 - **AND** 过程 JSON 作为后台排查产物，不作为普通用户下载文件
-
-#### Scenario: 脚本 payload 调试保留
-- **WHEN** 平台为管理员排查保留脚本 payload
-- **THEN** 该文件必须标记为 admin-only/internal debug/runtime temp
-- **AND** 普通用户不得通过结果文件列表或下载接口获取
-- **AND** 该文件不得作为下次评估输入或正式审计产物
-
-#### Scenario: 脚本 payload 运行时保留
-- **WHEN** 平台在 MVP 阶段为脚本执行保留 payload
-- **THEN** 脚本 payload 只能作为 `runtime` 内部文件存在
-- **AND** 脚本执行完成后不得登记为任务正式产物或普通用户文件
-- **AND** 后续可优化为内存传递或执行后删除
 
 ### Requirement: Excel 模板保真
 
@@ -73,11 +55,6 @@
 - **AND** 公式列只允许保留、复制或平移公式，不写业务值
 - **AND** `linked_process_ids` 和 `linked_data_ids` 只保留到过程 JSON，不新增写入 Excel 明细列
 
-#### Scenario: 系统场景字典映射
-- **WHEN** 冻结清单条目命中系统场景字典
-- **THEN** Excel 一级模块、二级模块和功能点计数项名称必须使用系统字典映射值
-- **AND** 脚本不得按需求文档章节或临时判断重新归类
-
 #### Scenario: 备注兜底
 - **WHEN** AI 输出备注缺少三段式依据
 - **THEN** 脚本根据 `category`、`reuse`、`change_type`、功能描述和原始备注生成兜底三段式备注
@@ -102,32 +79,11 @@
 
 系统 MUST 由脚本按模板公式口径同步计算页面需要展示的关键结果，并写入 `FPA生成过程.json`；页面不得读取 `.xlsx` 公式缓存。
 
-#### Scenario: 计算中值人天
-- **WHEN** 脚本处理功能点明细
-- **THEN** 输出 UFP 合计、调整后功能点合计、规模计数因子、调整后规模和调整后工作量中值
-- **AND** Excel 文件保留模板公式，供用户打开后由办公软件重算
-
-#### Scenario: 目标命中
-- **WHEN** payload 包含 `target_work_days`
-- **THEN** 脚本按结果中值是否落在目标 ±10% 范围内生成 `target_check`
-- **AND** 页面展示的目标命中来自过程 JSON 或后端保存的脚本结果
-
 #### Scenario: 结构质量提示
 - **WHEN** 备注缺失、目标偏差、模板结构异常、允许值异常或公式保护异常
 - **THEN** 脚本或后端生成结构质量提示
 - **AND** 质量提示用于风险提醒，不默认阻止已成功生成的 Excel 下载
 - **AND** `ITEM_COUNT_TOO_LOW`、`NO_ILF` 和 `NO_EO` 不得导致 `quality_gate.status = failed`
-
-#### Scenario: 普通用户不查看过程 JSON
-- **WHEN** 普通用户查看已完成任务
-- **THEN** 页面展示来自后端汇总的结果摘要和 Excel 下载入口
-- **AND** 不直接展示或下载完整 `FPA生成过程.json`
-- **AND** 不得返回服务器绝对路径、payload 路径、内部文件角色、原始模型错误、环境变量或模型 Key
-
-#### Scenario: 管理员查看完整过程信息
-- **WHEN** 管理员排查任务生成结果
-- **THEN** 后端可以展示完整过程 JSON 或内部路径摘要
-- **AND** 展示内容仍不得包含模型 Key、环境变量或其他敏感凭据
 
 #### Scenario: 禁止脚本业务补点
 - **WHEN** 脚本生成 Excel

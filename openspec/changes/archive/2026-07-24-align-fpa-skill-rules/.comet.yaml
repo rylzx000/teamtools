@@ -18,7 +18,7 @@ verification_report: docs/superpowers/reports/2026-07-24-align-fpa-skill-rules-v
 branch_status: handled
 created_at: 2026-07-23
 verified_at: 2026-07-24
-archived: false
+archived: true
 direct_override: null
 handoff_context: null
 handoff_hash: null
